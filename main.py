@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 
 from app.config import Config
 from app.telegram_bot import TelegramBot
@@ -23,9 +24,19 @@ async def main():
     except ValueError as e:
         print(f"Configuration error: {e}")
         print("Please check your environment variables.")
+        sys.exit(1)
     except Exception as e:
         print(f"Failed to start bot: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        # Use nest_asyncio to handle nested event loops
+        import nest_asyncio
+
+        nest_asyncio.apply()
+        asyncio.run(main())
+    except Exception as e:
+        print(f"Failed to start bot: {e}")
+        sys.exit(1)
