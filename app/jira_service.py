@@ -18,13 +18,17 @@ class JiraService:
         self._connect()
 
     def _connect(self):
-        """Establish connection to Jira."""
+        """Establish connection to Jira using Bearer token authentication."""
         try:
-            self.jira = JIRA(
-                server=Config.JIRA_URL,
-                basic_auth=(Config.JIRA_USERNAME, Config.JIRA_API_TOKEN),
-            )
-            logger.info("Successfully connected to Jira")
+            # Create custom headers for Bearer token authentication
+            headers = {
+                "Authorization": f"Bearer {Config.JIRA_API_TOKEN}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            }
+
+            self.jira = JIRA(server=Config.JIRA_URL, options={"headers": headers})
+            logger.info("Successfully connected to Jira with Bearer token")
         except JIRAError as e:
             logger.error(f"Failed to connect to Jira: {e}")
             raise

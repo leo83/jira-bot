@@ -62,6 +62,8 @@ Optional environment variables (defaults provided):
 3. Create a new API token
 4. Use this token as `JIRA_API_TOKEN`
 
+**Note:** The bot uses Bearer token authentication, which is more secure than basic auth.
+
 ### 4. Getting Telegram Bot Token
 
 1. Message @BotFather on Telegram
@@ -251,9 +253,16 @@ The bot will create a Jira story with:
 
 #### Jira connection issues:
 1. Verify Jira URL is accessible
-2. Check Jira username and API token
+2. Check Jira API token (Bearer authentication)
 3. Ensure the AAI project exists
 4. Verify the 'org' component exists in the project
+
+**Test your Jira token:**
+```bash
+curl -H "Accept: application/json" \
+     -H "Authorization: Bearer YOUR_API_TOKEN" \
+     "https://myteam.aeroclub.ru/rest/api/2/myself"
+```
 
 #### Docker issues:
 1. **Permission denied**: Run `sudo docker` commands or add user to docker group
