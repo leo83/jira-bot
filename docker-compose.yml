@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  jira-bot:
+    build: .
+    container_name: jira-telegram-bot
+    restart: unless-stopped
+    environment:
+      # Telegram Bot Configuration
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+
+      # Jira Configuration
+      - JIRA_URL=${JIRA_URL:-https://myteam.aeroclub.ru}
+      - JIRA_USERNAME=${JIRA_USERNAME}
+      - JIRA_API_TOKEN=${JIRA_API_TOKEN}
+
+      # Project Configuration (optional)
+      - JIRA_PROJECT_KEY=${JIRA_PROJECT_KEY:-AAI}
+      - JIRA_COMPONENT_NAME=${JIRA_COMPONENT_NAME:-org}
+    env_file:
+      - .env
+    volumes:
+      # Optional: Mount logs directory for persistence
+      - ./logs:/app/logs
+    networks:
+      - jira-bot-network
+
+networks:
+  jira-bot-network:
+    driver: bridge
