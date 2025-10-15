@@ -8,7 +8,9 @@ dependencies = [
     "python-telegram-bot>=20.0",
     "jira>=3.0",
     "python-dotenv>=1.0.0",
-    "nest-asyncio>=1.5.0"
+    "nest-asyncio>=1.5.0",
+    "transliterate>=1.10.2",
+    "fuzzywuzzy>=0.18.0"
 ]
 
 [build-system]

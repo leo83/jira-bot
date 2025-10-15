@@ -3,6 +3,7 @@ import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
+from .component_service import ComponentService
 from .config import Config
 from .jira_service import JiraService
 from .users import UserConfig
@@ -20,6 +21,8 @@ class TelegramBot:
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /start command."""
+        if not update.message:
+            return
         await update.message.reply_text(
             "Hello! I'm the Jira Bot. Use /task to create a new Jira story in the AAI project."
         )
@@ -27,6 +30,11 @@ class TelegramBot:
     async def task_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /task command to create a Jira story."""
         try:
+            # Check if message exists
+            if not update.message:
+                logger.warning("Received update without message")
+                return
+
             # Check user permissions
             user = update.effective_user
             if not UserConfig.is_user_allowed(user.username, user.id):
@@ -51,12 +59,29 @@ class TelegramBot:
                 )
                 return
 
+            # Check for component specification
+            component_name = Config.JIRA_COMPONENT_NAME  # Default to 'org'
+            if "component:" in task_description.lower():
+                # Extract component label after "component:"
+                parts = task_description.split("component:", 1)
+                if len(parts) > 1:
+                    component_label = parts[1].strip()
+                    # Remove component specification from task description
+                    task_description = parts[0].strip()
+
+                    # Find the closest component using transliteration and fuzzy matching
+                    component_name = ComponentService.find_component(component_label)
+                    logger.info(
+                        f"Selected component '{component_name}' for label '{component_label}'"
+                    )
+
             # Create the Jira story
             await update.message.reply_text("Creating Jira story...")
 
             issue_key = self.jira_service.create_story(
                 summary=task_description,
                 description=f"Created via Telegram bot by user {user.username or user.first_name}",
+                component_name=component_name,
             )
 
             if issue_key:
@@ -79,16 +104,24 @@ class TelegramBot:
 
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /help command."""
+        if not update.message:
+            return
         help_text = """
 🤖 Jira Bot Commands:
 
 /task <description> - Create a new Jira story in the AAI project
+/task <description> component: <component_label> - Create story with specific component
 /help - Show this help message
 /start - Start the bot
 /userinfo - Show your user information
+/admin - Show admin information (requires authorization)
 
-Example:
-/task Implement user authentication system
+📝 Examples:
+/task Fix login bug
+/task Add new feature component: авиа-параметры
+/task Update database component: devops
+
+💡 Component matching uses transliteration and fuzzy matching for Russian labels.
         """
         await update.message.reply_text(help_text)
 
@@ -96,6 +129,8 @@ Example:
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ):
         """Handle the /userinfo command to show user information."""
+        if not update.message:
+            return
         user = update.effective_user
         is_allowed = UserConfig.is_user_allowed(user.username, user.id)
 
@@ -112,6 +147,8 @@ Example:
 
     async def admin_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /admin command to show admin information."""
+        if not update.message:
+            return
         user = update.effective_user
 
         # Check if user is authorized (basic admin check)

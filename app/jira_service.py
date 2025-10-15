@@ -33,13 +33,16 @@ class JiraService:
             logger.error(f"Failed to connect to Jira: {e}")
             raise
 
-    def create_story(self, summary: str, description: str = None) -> Optional[str]:
+    def create_story(
+        self, summary: str, description: str = None, component_name: str = None
+    ) -> Optional[str]:
         """
-        Create a new Jira story in the AAI project with 'org' component.
+        Create a new Jira story in the AAI project with specified component.
 
         Args:
             summary (str): The story summary/title
             description (str, optional): The story description
+            component_name (str, optional): The component name (defaults to Config.JIRA_COMPONENT_NAME)
 
         Returns:
             str: The created issue key (e.g., 'AAI-123') or None if failed
@@ -49,17 +52,20 @@ class JiraService:
             project = self.jira.project(Config.JIRA_PROJECT_KEY)
             logger.info(f"Found project: {project.name}")
 
-            # Get the component ID for 'org'
+            # Use provided component name or default to Config.JIRA_COMPONENT_NAME
+            target_component = component_name or Config.JIRA_COMPONENT_NAME
+
+            # Get the component ID for the target component
             components = self.jira.project_components(Config.JIRA_PROJECT_KEY)
-            org_component = None
+            target_component_obj = None
             for component in components:
-                if component.name == Config.JIRA_COMPONENT_NAME:
-                    org_component = component
+                if component.name == target_component:
+                    target_component_obj = component
                     break
 
-            if not org_component:
+            if not target_component_obj:
                 logger.error(
-                    f"Component '{Config.JIRA_COMPONENT_NAME}' not found in project {Config.JIRA_PROJECT_KEY}"
+                    f"Component '{target_component}' not found in project {Config.JIRA_PROJECT_KEY}"
                 )
                 return None
 
@@ -68,7 +74,7 @@ class JiraService:
                 "project": {"key": Config.JIRA_PROJECT_KEY},
                 "summary": summary,
                 "issuetype": {"name": "Story"},
-                "components": [{"name": Config.JIRA_COMPONENT_NAME}],
+                "components": [{"name": target_component}],
             }
 
             if description:
