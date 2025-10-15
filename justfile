@@ -99,11 +99,24 @@ install:
 # Run locally
 local:
     just validate
+    just kill-bot
     uv run python main.py
+
+# Kill any running bot instances
+kill-bot:
+    @echo "Stopping any running bot instances..."
+    @pkill -f "python.*main.py" || true
+    @pkill -f "uv run python main.py" || true
+    @echo "✅ Bot instances stopped"
 
 # Check container status
 status:
     docker-compose ps
+
+# Check for running bot instances
+check-bot:
+    @echo "Checking for running bot instances..."
+    @ps aux | grep -E "(python.*main\.py|uv run python main\.py)" | grep -v grep || echo "No bot instances running"
 
 # Execute shell in running container
 shell:

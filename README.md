@@ -51,6 +51,7 @@ Required environment variables:
 
 Optional environment variables (defaults provided):
 
+- `ALLOWED_USERS` - Comma-separated list of authorized usernames and user IDs (leave empty to allow all users)
 - `JIRA_URL` - Jira server URL (default: https://myteam.aeroclub.ru)
 - `JIRA_PROJECT_KEY` - Project key (default: AAI)
 - `JIRA_COMPONENT_NAME` - Component name (default: org)
@@ -229,6 +230,30 @@ docker exec -it <container-name> /bin/bash
 1. Start a conversation with your bot on Telegram
 2. Use `/task Your task description here` to create a Jira story
 3. The bot will return the created task key and URL
+
+### Available Commands:
+
+- `/start` - Start the bot
+- `/task <description>` - Create a new Jira story (requires authorization)
+- `/userinfo` - Show your user information and access status
+- `/admin` - Show admin information (requires authorization)
+- `/help` - Show available commands
+
+### User Authorization:
+
+The bot supports user authorization to restrict who can create Jira tasks:
+
+1. **Allow all users** (default): Leave `ALLOWED_USERS` empty
+2. **Restrict access**: Set `ALLOWED_USERS` with usernames and user IDs
+
+Example configuration:
+```bash
+# Allow specific users
+ALLOWED_USERS=john_doe,123456789,jane_smith,987654321
+
+# Allow all users (default)
+ALLOWED_USERS=
+```
 
 Example:
 ```

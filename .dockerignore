@@ -49,9 +49,9 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
-# Documentation
-README.md
-*.md
+# Documentation (keep README.md for build)
+# README.md
+# *.md
 
 # Docker
 Dockerfile

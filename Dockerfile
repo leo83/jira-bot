@@ -1,5 +1,5 @@
 # Multi-stage build for production optimization
-FROM python:3.12-slim as builder
+FROM python:3.12-slim AS builder
 
 # Install system dependencies for building
 RUN apt-get update && apt-get install -y \
@@ -16,14 +16,16 @@ WORKDIR /app
 
 # Copy project files
 COPY pyproject.toml ./
+COPY README.md ./
 COPY app/ ./app/
 COPY main.py ./
+COPY uv.lock* ./
 
 # Install dependencies
-RUN uv sync --frozen
+RUN uv sync
 
 # Production stage
-FROM python:3.12-slim as production
+FROM python:3.12-slim AS production
 
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y \
