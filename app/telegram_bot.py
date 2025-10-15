@@ -59,6 +59,26 @@ class TelegramBot:
                 )
                 return
 
+            # Check for description specification
+            jira_description = None
+            if (
+                "desc:" in task_description.lower()
+                or "description:" in task_description.lower()
+            ):
+                # Extract description after "desc:" or "description:"
+                desc_parts = None
+                if "desc:" in task_description.lower():
+                    desc_parts = task_description.split("desc:", 1)
+                elif "description:" in task_description.lower():
+                    desc_parts = task_description.split("description:", 1)
+
+                if desc_parts and len(desc_parts) > 1:
+                    jira_description = desc_parts[1].strip()
+                    # Remove description part from task_description (summary)
+                    task_description = desc_parts[0].strip()
+                    logger.info(f"Extracted Jira description: '{jira_description}'")
+                    logger.info(f"Task summary: '{task_description}'")
+
             # Check for component specification
             component_name = Config.JIRA_COMPONENT_NAME  # Default to 'org'
             if "component:" in task_description.lower():
@@ -85,9 +105,15 @@ class TelegramBot:
             # Create the Jira story
             await update.message.reply_text("Creating Jira story...")
 
+            # Prepare description for Jira
+            if jira_description:
+                final_description = jira_description
+            else:
+                final_description = f"Created via Telegram bot by user {user.username or user.first_name}"
+
             issue_key = self.jira_service.create_story(
                 summary=task_description,
-                description=f"Created via Telegram bot by user {user.username or user.first_name}",
+                description=final_description,
                 component_name=component_name,
             )
 
@@ -118,6 +144,8 @@ class TelegramBot:
 
 /task <description> - Create a new Jira story in the AAI project
 /task <description> component: <component_label> - Create story with specific component
+/task desc: <description> - Use description after "desc:" as task description
+/task description: <description> - Use description after "description:" as task description
 /help - Show this help message
 /start - Start the bot
 /userinfo - Show your user information
@@ -126,7 +154,8 @@ class TelegramBot:
 📝 Examples:
 /task Fix login bug
 /task Add new feature component: авиа-параметры
-/task Update database component: devops
+/task desc: Implement user authentication system
+/task description: Update database schema component: devops
 
 💡 Component matching uses transliteration and fuzzy matching for Russian labels.
         """
