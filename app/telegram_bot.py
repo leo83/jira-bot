@@ -70,10 +70,17 @@ class TelegramBot:
                     task_description = parts[0].strip()
 
                     # Find the closest component using transliteration and fuzzy matching
-                    component_name = ComponentService.find_component(component_label)
+                    component_name, component_message = ComponentService.find_component(
+                        component_label
+                    )
                     logger.info(
                         f"Selected component '{component_name}' for label '{component_label}'"
                     )
+
+                    # If there's a message about available components, send it to the user and stop
+                    if component_message:
+                        await update.message.reply_text(component_message)
+                        return
 
             # Create the Jira story
             await update.message.reply_text("Creating Jira story...")
