@@ -27,14 +27,12 @@ RUN uv sync
 # Production stage
 FROM python:3.12-slim AS production
 
-# Install runtime dependencies only
+# Install runtime dependencies and uv globally
 RUN apt-get update && apt-get install -y \
     curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install uv in production image
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:$PATH"
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && mv /root/.local/bin/uv /usr/local/bin/uv
 
 # Set working directory
 WORKDIR /app

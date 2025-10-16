@@ -24,6 +24,8 @@ serviceAccount:
   name: ""
 
 podAnnotations: {}
+  # Disable Istio sidecar injection by default
+  # sidecar.istio.io/inject: "false"
 
 podSecurityContext:
   fsGroup: 2000

@@ -8,6 +8,8 @@ metadata:
     "helm.sh/hook": test
     "helm.sh/hook-weight": "1"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    # Disable Istio sidecar injection
+    sidecar.istio.io/inject: "false"
 spec:
   restartPolicy: Never
   containers:

@@ -257,6 +257,14 @@ resources:
     memory: 128Mi
 ```
 
+### 5. Istio Exclusion
+The chart automatically excludes Istio sidecar injection:
+
+```yaml
+podAnnotations:
+  sidecar.istio.io/inject: "false"
+```
+
 ## Troubleshooting
 
 ### Common Issues
