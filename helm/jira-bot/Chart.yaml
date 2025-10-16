@@ -1,0 +1,17 @@
+apiVersion: v2
+name: jira-bot
+description: A Helm chart for Jira Telegram Bot
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - telegram
+  - bot
+  - jira
+  - automation
+home: https://github.com/your-org/jira-bot
+sources:
+  - https://github.com/your-org/jira-bot
+maintainers:
+  - name: Your Name
+    email: your.email@example.com

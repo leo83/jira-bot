@@ -316,3 +316,38 @@ docker-compose ps
 # Restart the service
 docker-compose restart jira-bot
 ```
+
+## Kubernetes Deployment
+
+### Using Helm (Recommended)
+
+For production deployments, use Helm charts:
+
+```bash
+# Build and push image
+docker build -t jira-bot:latest .
+docker tag jira-bot:latest your-registry.com/jira-bot:latest
+docker push your-registry.com/jira-bot:latest
+
+# Deploy with Helm
+helm install jira-bot ./helm/jira-bot -f helm/jira-bot/values-production.yaml
+```
+
+See [HELM-DEPLOYMENT.md](HELM-DEPLOYMENT.md) for detailed Helm deployment instructions.
+
+### Using Raw Kubernetes Manifests
+
+For simple deployments, use raw Kubernetes manifests:
+
+```bash
+# Build and push image
+docker build -t jira-bot:latest .
+docker tag jira-bot:latest your-registry.com/jira-bot:latest
+docker push your-registry.com/jira-bot:latest
+
+# Deploy to Kubernetes
+kubectl apply -f k8s-secrets.yaml
+kubectl apply -f k8s-deployment-only.yaml
+```
+
+See [K8S-DEPLOYMENT.md](K8S-DEPLOYMENT.md) for detailed Kubernetes deployment instructions.

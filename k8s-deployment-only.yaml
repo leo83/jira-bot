@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jira-bot
+  labels:
+    app: jira-bot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jira-bot
+  template:
+    metadata:
+      labels:
+        app: jira-bot
+    spec:
+      containers:
+      - name: jira-bot
+        image: jira-bot:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: TELEGRAM_BOT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: jira-bot-secrets
+              key: telegram-bot-token
+        - name: JIRA_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: jira-bot-secrets
+              key: jira-username
+        - name: JIRA_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: jira-bot-secrets
+              key: jira-api-token
+        - name: JIRA_URL
+          value: "https://myteam.aeroclub.ru"
+        - name: JIRA_PROJECT_KEY
+          value: "AAI"
+        - name: JIRA_COMPONENT_NAME
+          value: "org"
+        - name: ALLOWED_USERS
+          value: ""
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import requests; requests.get('https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe', timeout=5)"
+          initialDelaySeconds: 30
+          periodSeconds: 60
+          timeoutSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import requests; requests.get('https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe', timeout=5)"
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jira-bot-service
+  labels:
+    app: jira-bot
+spec:
+  selector:
+    app: jira-bot
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+  type: ClusterIP

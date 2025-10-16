@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "jira-bot.fullname" . }}-test-connection"
+  labels:
+    {{- include "jira-bot.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+  - name: test-connection
+    image: busybox:1.35
+    command: ['sh', '-c']
+    args:
+      - |
+        set -e
+        echo "Testing Jira Bot connection..."
+        # Test if the service is accessible
+        wget --spider --timeout=5 http://{{ include "jira-bot.fullname" . }}:{{ .Values.service.port }}/ || exit 1
+        echo "Connection test passed!"

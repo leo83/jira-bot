@@ -1,0 +1,118 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "jira-bot.fullname" . }}
+  labels:
+    {{- include "jira-bot.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "jira-bot.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "jira-bot.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "jira-bot.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            {{- if .Values.secrets.create }}
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "jira-bot.fullname" . }}-secrets
+                  key: {{ .Values.secrets.telegramBotTokenKey }}
+            - name: JIRA_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "jira-bot.fullname" . }}-secrets
+                  key: {{ .Values.secrets.jiraUsernameKey }}
+            - name: JIRA_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "jira-bot.fullname" . }}-secrets
+                  key: {{ .Values.secrets.jiraApiTokenKey }}
+            {{- else if .Values.secrets.existingSecret }}
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.telegramBotTokenKey }}
+            - name: JIRA_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.jiraUsernameKey }}
+            - name: JIRA_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.jiraApiTokenKey }}
+            {{- else }}
+            - name: TELEGRAM_BOT_TOKEN
+              value: {{ .Values.env.telegramBotToken | quote }}
+            - name: JIRA_USERNAME
+              value: {{ .Values.env.jiraUsername | quote }}
+            - name: JIRA_API_TOKEN
+              value: {{ .Values.env.jiraApiToken | quote }}
+            {{- end }}
+            - name: JIRA_URL
+              value: {{ .Values.config.jira.url | quote }}
+            - name: JIRA_PROJECT_KEY
+              value: {{ .Values.config.jira.projectKey | quote }}
+            - name: JIRA_COMPONENT_NAME
+              value: {{ .Values.config.jira.componentName | quote }}
+            - name: ALLOWED_USERS
+              value: {{ .Values.config.allowedUsers | quote }}
+          {{- if .Values.config.healthCheck.enabled }}
+          livenessProbe:
+            exec:
+              command:
+              - python
+              - -c
+              - "import requests; requests.get('https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe', timeout=5)"
+            initialDelaySeconds: {{ .Values.config.healthCheck.initialDelaySeconds }}
+            periodSeconds: {{ .Values.config.healthCheck.periodSeconds }}
+            timeoutSeconds: {{ .Values.config.healthCheck.timeoutSeconds }}
+          readinessProbe:
+            exec:
+              command:
+              - python
+              - -c
+              - "import requests; requests.get('https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe', timeout=5)"
+            initialDelaySeconds: {{ .Values.config.healthCheck.readinessInitialDelaySeconds }}
+            periodSeconds: {{ .Values.config.healthCheck.readinessPeriodSeconds }}
+            timeoutSeconds: {{ .Values.config.healthCheck.readinessTimeoutSeconds }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
