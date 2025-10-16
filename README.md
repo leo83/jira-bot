@@ -330,7 +330,7 @@ docker tag jira-bot:latest your-registry.com/jira-bot:latest
 docker push your-registry.com/jira-bot:latest
 
 # Deploy with Helm
-helm install jira-bot ./helm/jira-bot -f helm/jira-bot/values-production.yaml
+helm install jira-bot ./helm/jira-bot -f helm/jira-bot/values-production.yaml -n jira-bot --create-namespace
 ```
 
 See [HELM-DEPLOYMENT.md](HELM-DEPLOYMENT.md) for detailed Helm deployment instructions.

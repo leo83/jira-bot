@@ -44,11 +44,11 @@ echo -n "your_jira_api_token" | base64
 helm repo add your-repo https://your-chart-repo.com
 helm repo update
 
-# Install the chart
-helm install jira-bot ./helm/jira-bot -f helm/jira-bot/values-production-local.yaml
+# Install the chart with namespace
+helm install jira-bot ./helm/jira-bot -f helm/jira-bot/values-production-local.yaml -n jira-bot --create-namespace
 
 # Or upgrade if already installed
-helm upgrade jira-bot ./helm/jira-bot -f helm/jira-bot/values-production-local.yaml
+helm upgrade jira-bot ./helm/jira-bot -f helm/jira-bot/values-production-local.yaml -n jira-bot
 ```
 
 ## Configuration
@@ -119,6 +119,9 @@ helm install jira-bot ./helm/jira-bot -f helm/jira-bot/values-production-local.y
 
 # Install with specific namespace
 helm install jira-bot ./helm/jira-bot -n jira-bot --create-namespace
+
+# Or use namespace from values file
+helm install jira-bot ./helm/jira-bot -f helm/jira-bot/values-production.yaml -n $(yq eval '.namespace' helm/jira-bot/values-production.yaml) --create-namespace
 ```
 
 ### Upgrade
