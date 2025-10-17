@@ -88,9 +88,7 @@ spec:
           livenessProbe:
             exec:
               command:
-              - uv
-              - run
-              - python
+              - /app/.venv/bin/python
               - -c
               - "import requests; requests.get('https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe', timeout=5)"
             initialDelaySeconds: {{ .Values.config.healthCheck.initialDelaySeconds }}
@@ -99,9 +97,7 @@ spec:
           readinessProbe:
             exec:
               command:
-              - uv
-              - run
-              - python
+              - /app/.venv/bin/python
               - -c
               - "import requests; requests.get('https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe', timeout=5)"
             initialDelaySeconds: {{ .Values.config.healthCheck.readinessInitialDelaySeconds }}
