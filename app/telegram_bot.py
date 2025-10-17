@@ -18,6 +18,7 @@ class TelegramBot:
     def __init__(self):
         """Initialize the Telegram bot."""
         self.jira_service = JiraService()
+        self.component_service = ComponentService(self.jira_service)
         self.application = None
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -91,8 +92,8 @@ class TelegramBot:
                     task_description = parts[0].strip()
 
                     # Find the closest component using transliteration and fuzzy matching
-                    component_name, component_message = ComponentService.find_component(
-                        component_label
+                    component_name, component_message = (
+                        self.component_service.find_component(component_label)
                     )
                     logger.info(
                         f"Selected component '{component_name}' for label '{component_label}'"

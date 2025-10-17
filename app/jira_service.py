@@ -15,6 +15,7 @@ class JiraService:
     def __init__(self):
         """Initialize Jira service with configuration."""
         self.jira = None
+        self.project_key = Config.JIRA_PROJECT_KEY
         self._connect()
 
     def _connect(self):
