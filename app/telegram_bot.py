@@ -57,7 +57,16 @@ class TelegramBot:
                 task_description = " ".join(message_text.split()[1:])
             else:
                 await update.message.reply_text(
-                    "Please provide a task description. Usage: /task Your task description here"
+                    "❌ Please provide a task description.\n\n"
+                    "📝 Usage examples:\n"
+                    "• `/task Fix login bug`\n"
+                    "• `/task Add new feature component: авиа-параметры`\n"
+                    "• `/task Fix critical bug type: Bug`\n"
+                    "• `/task desc: Implement user authentication system`\n"
+                    "• `/task Update database component: devops type: Bug`\n\n"
+                    "💡 Available issue types: Story, Bug\n"
+                    "💡 Components are matched using transliteration and fuzzy matching\n"
+                    "💡 Use `/help` for more detailed information"
                 )
                 return
 
@@ -185,7 +194,11 @@ class TelegramBot:
 /task desc: Implement user authentication system
 /task description: Update database schema component: devops type: Bug
 
-💡 Component matching uses transliteration and fuzzy matching for Russian labels.
+💡 Features:
+• Component matching uses transliteration and fuzzy matching for Russian labels
+• Components are fetched dynamically from Jira (DEPRECATED components are filtered out)
+• Available issue types: Story, Bug
+• If no close component match is found, you'll see available components list
         """
         await update.message.reply_text(help_text)
 
