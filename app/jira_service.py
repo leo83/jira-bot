@@ -34,15 +34,20 @@ class JiraService:
             raise
 
     def create_story(
-        self, summary: str, description: str = None, component_name: str = None
+        self,
+        summary: str,
+        description: str = None,
+        component_name: str = None,
+        issue_type: str = "Story",
     ) -> Optional[str]:
         """
-        Create a new Jira story in the AAI project with specified component.
+        Create a new Jira issue in the AAI project with specified component and type.
 
         Args:
-            summary (str): The story summary/title
-            description (str, optional): The story description
+            summary (str): The issue summary/title
+            description (str, optional): The issue description
             component_name (str, optional): The component name (defaults to Config.JIRA_COMPONENT_NAME)
+            issue_type (str, optional): The issue type (defaults to "Story")
 
         Returns:
             str: The created issue key (e.g., 'AAI-123') or None if failed
@@ -73,7 +78,7 @@ class JiraService:
             issue_dict = {
                 "project": {"key": Config.JIRA_PROJECT_KEY},
                 "summary": summary,
-                "issuetype": {"name": "Story"},
+                "issuetype": {"name": issue_type},
                 "components": [{"name": target_component}],
             }
 

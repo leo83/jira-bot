@@ -5,6 +5,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 from .component_service import ComponentService
 from .config import Config
+from .issue_type_service import IssueTypeService
 from .jira_service import JiraService
 from .users import UserConfig
 
@@ -102,8 +103,31 @@ class TelegramBot:
                         await update.message.reply_text(component_message)
                         return
 
-            # Create the Jira story
-            await update.message.reply_text("Creating Jira story...")
+            # Check for issue type specification
+            issue_type = "Story"  # Default to 'Story'
+            if "type:" in task_description.lower():
+                # Extract issue type label after "type:"
+                parts = task_description.split("type:", 1)
+                if len(parts) > 1:
+                    issue_type_label = parts[1].strip()
+                    # Remove issue type specification from task description
+                    task_description = parts[0].strip()
+
+                    # Find the closest issue type using fuzzy matching
+                    issue_type, issue_type_message = IssueTypeService.find_issue_type(
+                        issue_type_label
+                    )
+                    logger.info(
+                        f"Selected issue type '{issue_type}' for label '{issue_type_label}'"
+                    )
+
+                    # If there's a message about available issue types, send it to the user and stop
+                    if issue_type_message:
+                        await update.message.reply_text(issue_type_message)
+                        return
+
+            # Create the Jira issue
+            await update.message.reply_text(f"Creating Jira {issue_type.lower()}...")
 
             # Prepare description for Jira
             if jira_description:
@@ -115,18 +139,19 @@ class TelegramBot:
                 summary=task_description,
                 description=final_description,
                 component_name=component_name,
+                issue_type=issue_type,
             )
 
             if issue_key:
                 issue_url = self.jira_service.get_issue_url(issue_key)
                 await update.message.reply_text(
-                    f"✅ Jira story created successfully!\n\n"
+                    f"✅ Jira {issue_type.lower()} created successfully!\n\n"
                     f"📋 Task Key: {issue_key}\n"
                     f"🔗 URL: {issue_url}"
                 )
             else:
                 await update.message.reply_text(
-                    "❌ Failed to create Jira story. Please check the bot configuration and try again."
+                    f"❌ Failed to create Jira {issue_type.lower()}. Please check the bot configuration and try again."
                 )
 
         except Exception as e:
@@ -144,6 +169,7 @@ class TelegramBot:
 
 /task <description> - Create a new Jira story in the AAI project
 /task <description> component: <component_label> - Create story with specific component
+/task <description> type: <issue_type> - Create issue with specific type (Story, Bug)
 /task desc: <description> - Use description after "desc:" as task description
 /task description: <description> - Use description after "description:" as task description
 /help - Show this help message
@@ -154,8 +180,9 @@ class TelegramBot:
 📝 Examples:
 /task Fix login bug
 /task Add new feature component: авиа-параметры
+/task Fix critical bug type: Bug
 /task desc: Implement user authentication system
-/task description: Update database schema component: devops
+/task description: Update database schema component: devops type: Bug
 
 💡 Component matching uses transliteration and fuzzy matching for Russian labels.
         """
