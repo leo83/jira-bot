@@ -34,8 +34,96 @@ class TelegramBot:
         if not update.message:
             return
         await update.message.reply_text(
-            "Hello! I'm the Jira Bot. Use /task to create a new Jira story in the AAI project."
+            f"Hello! I'm the Jira Bot. Use /task to create a new Jira task or /desc to view existing tasks.\n\n"
+            f"Type /help for more commands."
         )
+
+    async def _parse_task_parameters(self, task_description: str, update: Update):
+        """
+        Parse task parameters from task_description. Parameters can appear in any order.
+        Supported parameters: type:, component:, desc:/description:
+        Returns: (summary, description, component_name, issue_type, should_stop)
+        """
+        import re
+
+        # Initialize defaults
+        issue_type = "Story"
+        component_name = Config.JIRA_COMPONENT_NAME
+        jira_description = None
+
+        # Pattern to find all parameters: type:, component:, desc:, description:
+        # This captures the parameter name and value up to the next parameter keyword
+        param_pattern = r"(type:|component:|desc:|description:)\s*(.+?)(?=\s+(?:type:|component:|desc:|description:)|$)"
+
+        matches = list(re.finditer(param_pattern, task_description, re.IGNORECASE))
+
+        if matches:
+            # Extract parameters
+            params = {}
+            for match in matches:
+                param_name = match.group(1).lower().rstrip(":")
+                param_value = match.group(2).strip()
+
+                # Handle desc/description as the same parameter
+                if param_name in ["desc", "description"]:
+                    param_name = "description"
+
+                params[param_name] = param_value
+
+            # Remove all parameter definitions from the task description to get the summary
+            summary = task_description
+            for match in reversed(
+                matches
+            ):  # Remove in reverse order to maintain positions
+                summary = summary[: match.start()] + summary[match.end() :]
+            summary = summary.strip()
+
+            # Process type parameter
+            if "type" in params:
+                issue_type_label = params["type"]
+                issue_type, issue_type_message = IssueTypeService.find_issue_type(
+                    issue_type_label
+                )
+                logger.info(
+                    f"Selected issue type '{issue_type}' for label '{issue_type_label}'"
+                )
+
+                if issue_type_message:
+                    await update.message.reply_text(issue_type_message)
+                    return None, None, None, None, True
+
+            # Process component parameter
+            if "component" in params:
+                component_label = params["component"]
+                component_name, component_message = (
+                    self.component_service.find_component(component_label)
+                )
+                logger.info(
+                    f"Selected component '{component_name}' for label '{component_label}'"
+                )
+
+                if component_message:
+                    await update.message.reply_text(component_message)
+                    return None, None, None, None, True
+
+            # Process description parameter
+            if "description" in params:
+                jira_description = params["description"]
+                logger.info(f"Extracted Jira description: '{jira_description}'")
+
+            # Use summary from what's left after removing parameters
+            task_description = summary
+            logger.info(f"Task summary: '{task_description}'")
+
+            # If summary is empty but description exists, use description as summary
+            if not task_description and jira_description:
+                task_description = jira_description
+                jira_description = None
+                logger.info(
+                    f"Summary was empty, using description as summary: '{task_description}'"
+                )
+
+        return task_description, jira_description, component_name, issue_type, False
 
     async def task_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /task command to create a Jira story."""
@@ -93,71 +181,16 @@ class TelegramBot:
                 )
                 return
 
-            # Check for description specification
-            jira_description = None
-            if (
-                "desc:" in task_description.lower()
-                or "description:" in task_description.lower()
-            ):
-                # Extract description after "desc:" or "description:"
-                desc_parts = None
-                if "desc:" in task_description.lower():
-                    desc_parts = task_description.split("desc:", 1)
-                elif "description:" in task_description.lower():
-                    desc_parts = task_description.split("description:", 1)
-
-                if desc_parts and len(desc_parts) > 1:
-                    jira_description = desc_parts[1].strip()
-                    # Remove description part from task_description (summary)
-                    task_description = desc_parts[0].strip()
-                    logger.info(f"Extracted Jira description: '{jira_description}'")
-                    logger.info(f"Task summary: '{task_description}'")
-
-            # Check for component specification
-            component_name = Config.JIRA_COMPONENT_NAME  # Default to 'org'
-            if "component:" in task_description.lower():
-                # Extract component label after "component:"
-                parts = task_description.split("component:", 1)
-                if len(parts) > 1:
-                    component_label = parts[1].strip()
-                    # Remove component specification from task description
-                    task_description = parts[0].strip()
-
-                    # Find the closest component using transliteration and fuzzy matching
-                    component_name, component_message = (
-                        self.component_service.find_component(component_label)
-                    )
-                    logger.info(
-                        f"Selected component '{component_name}' for label '{component_label}'"
-                    )
-
-                    # If there's a message about available components, send it to the user and stop
-                    if component_message:
-                        await update.message.reply_text(component_message)
-                        return
-
-            # Check for issue type specification
-            issue_type = "Story"  # Default to 'Story'
-            if "type:" in task_description.lower():
-                # Extract issue type label after "type:"
-                parts = task_description.split("type:", 1)
-                if len(parts) > 1:
-                    issue_type_label = parts[1].strip()
-                    # Remove issue type specification from task description
-                    task_description = parts[0].strip()
-
-                    # Find the closest issue type using fuzzy matching
-                    issue_type, issue_type_message = IssueTypeService.find_issue_type(
-                        issue_type_label
-                    )
-                    logger.info(
-                        f"Selected issue type '{issue_type}' for label '{issue_type_label}'"
-                    )
-
-                    # If there's a message about available issue types, send it to the user and stop
-                    if issue_type_message:
-                        await update.message.reply_text(issue_type_message)
-                        return
+            # Parse task parameters using the helper method
+            (
+                task_description,
+                jira_description,
+                component_name,
+                issue_type,
+                should_stop,
+            ) = await self._parse_task_parameters(task_description, update)
+            if should_stop:
+                return
 
             # Create the Jira issue
             await update.message.reply_text(f"Creating Jira {issue_type.lower()}...")
@@ -211,14 +244,14 @@ class TelegramBot:
         """Handle the /help command."""
         if not update.message:
             return
-        help_text = """
+        help_text = f"""
 🤖 Jira Bot Commands:
 
-/task <description> - Create a new Jira story in the AAI project
-/task <description> component: <component_label> - Create story with specific component
-/task <description> type: <issue_type> - Create issue with specific type (Story, Bug)
+/task <description> - Create a new Jira task
+/task <description> component: <label> - Create task with specific component
+/task <description> type: <type> - Create task with specific type (Story, Bug)
 /task desc: <description> - Use description after "desc:" as task description
-/task description: <description> - Use description after "description:" as task description
+/desc <issue-key> - Get details of a Jira issue (e.g., /desc 123 or /desc AAI-123)
 /help - Show this help message
 /start - Start the bot
 /userinfo - Show your user information
@@ -227,6 +260,8 @@ class TelegramBot:
 📝 Examples:
 /task Fix login bug
 /task Add new feature component: авиа-параметры
+/desc 123
+/desc AAI-456
 /task Fix critical bug type: Bug
 /task desc: Implement user authentication system
 /task description: Update database schema component: devops type: Bug
@@ -346,6 +381,178 @@ class TelegramBot:
 
         await update.message.reply_text(admin_info)
 
+    async def desc_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle the /desc command to fetch and display Jira issue details."""
+        if not update.message:
+            return
+
+        user = update.effective_user
+
+        # Check user permissions
+        if not UserConfig.is_user_allowed(user.username, user.id):
+            await update.message.reply_text(
+                "❌ Access denied. You are not authorized to view Jira tasks."
+            )
+            logger.warning(
+                f"Unauthorized access attempt by user: {user.username} (ID: {user.id})"
+            )
+            return
+
+        # Get the issue key from the command
+        message_text = update.message.text or ""
+        parts = message_text.split(maxsplit=1)
+
+        if len(parts) < 2:
+            await update.message.reply_text(
+                "❌ Please provide an issue key.\n\n"
+                "Usage: `/desc <issue-key>`\n"
+                "Examples:\n"
+                "  • `/desc 123` - Gets AAI-123\n"
+                "  • `/desc AAI-123` - Gets AAI-123\n"
+                "  • `/desc PROJ-456` - Gets PROJ-456"
+            )
+            return
+
+        issue_key = parts[1].strip()
+
+        # Send "fetching" message
+        await update.message.reply_text(f"🔍 Fetching issue {issue_key}...")
+
+        try:
+            # Get issue details from Jira
+            issue_data = self.jira_service.get_issue(issue_key)
+
+            if not issue_data:
+                await update.message.reply_text(
+                    f"❌ Could not find issue {issue_key} or you don't have permission to view it."
+                )
+                return
+
+            # Format issue information
+            issue_text = f"""
+📋 **{issue_data["key"]}** - {issue_data["issue_type"]}
+
+**Summary:** {issue_data["summary"]}
+
+**Status:** {issue_data["status"]}
+**Assignee:** {issue_data["assignee"]}
+**Reporter:** {issue_data["reporter"]}
+
+**Description:**
+{issue_data["description"]}
+
+🔗 {self.jira_service.get_issue_url(issue_data["key"])}
+"""
+
+            # Check if there are image attachments
+            image_attachments = []
+            other_attachments = []
+
+            if issue_data["attachments"]:
+                for attachment in issue_data["attachments"]:
+                    if attachment["mimeType"].startswith("image/"):
+                        image_attachments.append(attachment)
+                    else:
+                        other_attachments.append(attachment)
+
+            # If there's at least one image, send the first image with the issue text as caption
+            if image_attachments:
+                first_image = image_attachments[0]
+                try:
+                    file_path = self.jira_service.download_attachment(
+                        first_image["content_url"], first_image["filename"]
+                    )
+
+                    if file_path:
+                        with open(file_path, "rb") as f:
+                            await update.message.reply_photo(
+                                photo=f, caption=issue_text, parse_mode="Markdown"
+                            )
+
+                        # Clean up
+                        import os
+
+                        try:
+                            os.unlink(file_path)
+                        except:
+                            pass
+
+                        # Remove the first image from the list
+                        image_attachments = image_attachments[1:]
+                except Exception as e:
+                    logger.error(f"Failed to send first image: {e}")
+                    # Fallback to text-only message
+                    await update.message.reply_text(issue_text, parse_mode="Markdown")
+            else:
+                # No images, send text only
+                await update.message.reply_text(issue_text, parse_mode="Markdown")
+
+            # Send remaining image attachments
+            if image_attachments:
+                for attachment in image_attachments:
+                    try:
+                        file_path = self.jira_service.download_attachment(
+                            attachment["content_url"], attachment["filename"]
+                        )
+
+                        if file_path:
+                            with open(file_path, "rb") as f:
+                                await update.message.reply_photo(
+                                    photo=f, caption=f"📎 {attachment['filename']}"
+                                )
+
+                            # Clean up
+                            import os
+
+                            try:
+                                os.unlink(file_path)
+                            except:
+                                pass
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to send attachment {attachment['filename']}: {e}"
+                        )
+                        await update.message.reply_text(
+                            f"⚠️ Failed to download attachment: {attachment['filename']}"
+                        )
+
+            # Send non-image attachments
+            if other_attachments:
+                for attachment in other_attachments:
+                    try:
+                        file_path = self.jira_service.download_attachment(
+                            attachment["content_url"], attachment["filename"]
+                        )
+
+                        if file_path:
+                            with open(file_path, "rb") as f:
+                                await update.message.reply_document(
+                                    document=f,
+                                    filename=attachment["filename"],
+                                    caption=f"📎 {attachment['filename']}",
+                                )
+
+                            # Clean up
+                            import os
+
+                            try:
+                                os.unlink(file_path)
+                            except:
+                                pass
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to send attachment {attachment['filename']}: {e}"
+                        )
+                        await update.message.reply_text(
+                            f"⚠️ Failed to download attachment: {attachment['filename']}"
+                        )
+
+        except Exception as e:
+            logger.error(f"Error in desc_command: {e}")
+            await update.message.reply_text(
+                "❌ An error occurred while fetching the issue. Please try again later."
+            )
+
     async def photo_message_handler(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ):
@@ -422,14 +629,12 @@ class TelegramBot:
                     return
 
                 # This is the first photo in the media group
-                # Create the task immediately with this photo
-                logger.info(
-                    f"DEBUG: First photo in media group {media_group_id}, creating task"
-                )
+                logger.info(f"DEBUG: First photo in media group {media_group_id}")
 
                 # Process the caption to extract task details
                 caption = update.message.caption or ""
 
+                # Only create task if there's a /task command
                 if caption.startswith("/task"):
                     logger.info("DEBUG: Found /task command in first photo caption")
                     task_description = (
@@ -437,27 +642,30 @@ class TelegramBot:
                         if len(caption.split()) > 1
                         else ""
                     )
-                else:
-                    task_description = "Task with image attachment"
 
-                # Process and create the task with the first photo
-                if update.message.photo:
-                    # Only use the highest quality version (last one in the list)
-                    best_photo = update.message.photo[-1]
-                    photos_to_process = [best_photo]
+                    # Process and create the task with the first photo
+                    if update.message.photo:
+                        # Only use the highest quality version (last one in the list)
+                        best_photo = update.message.photo[-1]
+                        photos_to_process = [best_photo]
 
-                    # Create the task and get the task key
-                    created_task_key = await self._process_task(
-                        update, task_description, photos_to_process
-                    )
-
-                    # Store the task key for this media group
-                    if created_task_key:
-                        context.bot_data[task_key] = created_task_key
-                        context.bot_data[photo_count_key] = 1
-                        logger.info(
-                            f"DEBUG: Stored task {created_task_key} for media group {media_group_id}"
+                        # Create the task and get the task key
+                        created_task_key = await self._process_task(
+                            update, task_description, photos_to_process
                         )
+
+                        # Store the task key for this media group
+                        if created_task_key:
+                            context.bot_data[task_key] = created_task_key
+                            context.bot_data[photo_count_key] = 1
+                            logger.info(
+                                f"DEBUG: Stored task {created_task_key} for media group {media_group_id}"
+                            )
+                else:
+                    # No /task command, just ignore the photo
+                    logger.info(
+                        "DEBUG: Media group photo without /task command - ignoring"
+                    )
 
                 return
 
@@ -480,33 +688,9 @@ class TelegramBot:
                 await self._process_task(update, task_description, update.message.photo)
                 return
 
-            # Check user permissions
-            user = update.effective_user
-            if not UserConfig.is_user_allowed(user.username, user.id):
-                await update.message.reply_text(
-                    "❌ Access denied. You are not authorized to create Jira tasks.\n"
-                    f"Contact administrator to get access."
-                )
-                logger.warning(
-                    f"Unauthorized access attempt by user: {user.username} (ID: {user.id})"
-                )
-                return
-
-            # This handler only processes photo-only messages (no text at all)
-            # Get photo attachments
-            photo_attachments = []
-            if update.message.photo:
-                photo_attachments = update.message.photo
-                logger.info(
-                    f"Found {len(photo_attachments)} photo attachments in photo-only message"
-                )
-
-            # Use default description for photo-only tasks
-            task_description = "Task with image attachment"
-            logger.info("DEBUG: Using default description for photo-only task")
-
-            # Process the task
-            await self._process_task(update, task_description, photo_attachments)
+            # If photo doesn't have /task command, ignore it (just a regular photo message)
+            logger.info("DEBUG: Photo without /task command - ignoring")
+            return
 
         except Exception as e:
             logger.error(f"Error in photo_message_handler: {e}")
@@ -521,71 +705,16 @@ class TelegramBot:
         try:
             user = update.effective_user
 
-            # Check for description specification
-            jira_description = None
-            if (
-                "desc:" in task_description.lower()
-                or "description:" in task_description.lower()
-            ):
-                # Extract description after "desc:" or "description:"
-                desc_parts = None
-                if "desc:" in task_description.lower():
-                    desc_parts = task_description.split("desc:", 1)
-                elif "description:" in task_description.lower():
-                    desc_parts = task_description.split("description:", 1)
-
-                if desc_parts and len(desc_parts) > 1:
-                    jira_description = desc_parts[1].strip()
-                    # Remove description part from task_description (summary)
-                    task_description = desc_parts[0].strip()
-                    logger.info(f"Extracted Jira description: '{jira_description}'")
-                    logger.info(f"Task summary: '{task_description}'")
-
-            # Check for component specification
-            component_name = Config.JIRA_COMPONENT_NAME  # Default to 'org'
-            if "component:" in task_description.lower():
-                # Extract component label after "component:"
-                parts = task_description.split("component:", 1)
-                if len(parts) > 1:
-                    component_label = parts[1].strip()
-                    # Remove component specification from task description
-                    task_description = parts[0].strip()
-
-                    # Find the closest component using transliteration and fuzzy matching
-                    component_name, component_message = (
-                        self.component_service.find_component(component_label)
-                    )
-                    logger.info(
-                        f"Selected component '{component_name}' for label '{component_label}'"
-                    )
-
-                    # If there's a message about available components, send it to the user and stop
-                    if component_message:
-                        await update.message.reply_text(component_message)
-                        return
-
-            # Check for issue type specification
-            issue_type = "Story"  # Default to 'Story'
-            if "type:" in task_description.lower():
-                # Extract issue type label after "type:"
-                parts = task_description.split("type:", 1)
-                if len(parts) > 1:
-                    issue_type_label = parts[1].strip()
-                    # Remove issue type specification from task description
-                    task_description = parts[0].strip()
-
-                    # Find the closest issue type using fuzzy matching
-                    issue_type, issue_type_message = IssueTypeService.find_issue_type(
-                        issue_type_label
-                    )
-                    logger.info(
-                        f"Selected issue type '{issue_type}' for label '{issue_type_label}'"
-                    )
-
-                    # If there's a message about available issue types, send it to the user and stop
-                    if issue_type_message:
-                        await update.message.reply_text(issue_type_message)
-                        return
+            # Parse task parameters using the helper method
+            (
+                task_description,
+                jira_description,
+                component_name,
+                issue_type,
+                should_stop,
+            ) = await self._parse_task_parameters(task_description, update)
+            if should_stop:
+                return
 
             # Create the Jira issue
             await update.message.reply_text(f"Creating Jira {issue_type.lower()}...")
@@ -642,6 +771,7 @@ class TelegramBot:
         """Set up command handlers for the bot."""
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("task", self.task_command))
+        self.application.add_handler(CommandHandler("desc", self.desc_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("userinfo", self.userinfo_command))
         self.application.add_handler(CommandHandler("admin", self.admin_command))
