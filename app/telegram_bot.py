@@ -15,6 +15,7 @@ from .component_service import ComponentService
 from .config import Config
 from .issue_type_service import IssueTypeService
 from .jira_service import JiraService
+from .sprint_service import SprintService
 from .users import UserConfig
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ class TelegramBot:
         """Initialize the Telegram bot."""
         self.jira_service = JiraService()
         self.component_service = ComponentService(self.jira_service)
+        self.sprint_service = SprintService(self.jira_service.jira)
         self.application = None
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -41,8 +43,8 @@ class TelegramBot:
     async def _parse_task_parameters(self, task_description: str, update: Update):
         """
         Parse task parameters from task_description. Parameters can appear in any order.
-        Supported parameters: type:, component:, desc:/description:
-        Returns: (summary, description, component_name, issue_type, should_stop)
+        Supported parameters: type:, component:, sprint:, desc:/description:
+        Returns: (summary, description, component_name, issue_type, sprint_id, should_stop)
         """
         import re
 
@@ -50,10 +52,11 @@ class TelegramBot:
         issue_type = "Story"
         component_name = Config.JIRA_COMPONENT_NAME
         jira_description = None
+        sprint_id = None
 
-        # Pattern to find all parameters: type:, component:, desc:, description:
+        # Pattern to find all parameters: type:, component:, sprint:, desc:, description:
         # This captures the parameter name and value up to the next parameter keyword
-        param_pattern = r"(type:|component:|desc:|description:)\s*(.+?)(?=\s+(?:type:|component:|desc:|description:)|$)"
+        param_pattern = r"(type:|component:|sprint:|desc:|description:)\s*(.+?)(?=\s+(?:type:|component:|sprint:|desc:|description:)|$)"
 
         matches = list(re.finditer(param_pattern, task_description, re.IGNORECASE))
 
@@ -90,7 +93,7 @@ class TelegramBot:
 
                 if issue_type_message:
                     await update.message.reply_text(issue_type_message)
-                    return None, None, None, None, True
+                    return None, None, None, None, None, True
 
             # Process component parameter
             if "component" in params:
@@ -104,7 +107,23 @@ class TelegramBot:
 
                 if component_message:
                     await update.message.reply_text(component_message)
-                    return None, None, None, None, True
+                    return None, None, None, None, None, True
+
+            # Process sprint parameter
+            if "sprint" in params:
+                sprint_query = params["sprint"]
+                sprint_id, sprint_message = self.sprint_service.find_sprint(
+                    sprint_query
+                )
+
+                if sprint_message:
+                    # Error or ambiguity - notify user
+                    await update.message.reply_text(sprint_message)
+                    return None, None, None, None, None, True
+
+                logger.info(
+                    f"Selected sprint ID: {sprint_id} for query '{sprint_query}'"
+                )
 
             # Process description parameter
             if "description" in params:
@@ -123,7 +142,14 @@ class TelegramBot:
                     f"Summary was empty, using description as summary: '{task_description}'"
                 )
 
-        return task_description, jira_description, component_name, issue_type, False
+        return (
+            task_description,
+            jira_description,
+            component_name,
+            issue_type,
+            sprint_id,
+            False,
+        )
 
     async def task_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /task command to create a Jira story."""
@@ -187,6 +213,7 @@ class TelegramBot:
                 jira_description,
                 component_name,
                 issue_type,
+                sprint_id,
                 should_stop,
             ) = await self._parse_task_parameters(task_description, update)
             if should_stop:
@@ -219,6 +246,7 @@ class TelegramBot:
                 component_name=component_name,
                 issue_type=issue_type,
                 attachments=attachment_files,
+                sprint_id=sprint_id,
             )
 
             if issue_key:
@@ -713,6 +741,7 @@ class TelegramBot:
                 jira_description,
                 component_name,
                 issue_type,
+                sprint_id,
                 should_stop,
             ) = await self._parse_task_parameters(task_description, update)
             if should_stop:
@@ -745,6 +774,7 @@ class TelegramBot:
                 component_name=component_name,
                 issue_type=issue_type,
                 attachments=attachment_files,
+                sprint_id=sprint_id,
             )
 
             if issue_key:

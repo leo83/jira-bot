@@ -42,6 +42,7 @@ class JiraService:
         component_name: str = None,
         issue_type: str = "Story",
         attachments: List[str] = None,
+        sprint_id: int = None,
     ) -> Optional[str]:
         """
         Create a new Jira issue in the AAI project with specified component and type.
@@ -52,6 +53,7 @@ class JiraService:
             component_name (str, optional): The component name (defaults to Config.JIRA_COMPONENT_NAME)
             issue_type (str, optional): The issue type (defaults to "Story")
             attachments (List[str], optional): List of file paths to attach to the issue
+            sprint_id (int, optional): The sprint ID to add the issue to
 
         Returns:
             str: The created issue key (e.g., 'AAI-123') or None if failed
@@ -92,6 +94,15 @@ class JiraService:
             # Create the issue
             new_issue = self.jira.create_issue(fields=issue_dict)
             logger.info(f"Created issue: {new_issue.key}")
+
+            # Add issue to sprint if sprint_id provided
+            if sprint_id:
+                try:
+                    self.jira.add_issues_to_sprint(sprint_id, [new_issue.key])
+                    logger.info(f"Added issue {new_issue.key} to sprint {sprint_id}")
+                except Exception as e:
+                    logger.error(f"Failed to add issue to sprint {sprint_id}: {e}")
+                    # Don't fail the whole operation if sprint assignment fails
 
             # Add attachments if provided
             if attachments:
