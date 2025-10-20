@@ -685,7 +685,9 @@ class TelegramBot:
                 )
 
                 # Process the task with the caption text
-                await self._process_task(update, task_description, update.message.photo)
+                # Pass only the highest quality photo (last one in the list)
+                best_photo = [update.message.photo[-1]] if update.message.photo else []
+                await self._process_task(update, task_description, best_photo)
                 return
 
             # If photo doesn't have /task command, ignore it (just a regular photo message)
