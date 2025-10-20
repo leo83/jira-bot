@@ -13,3 +13,4 @@ wheels/
 .env
 helm/jira-bot/values-production.yaml
 features.md
+*.temp

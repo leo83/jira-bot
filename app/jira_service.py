@@ -121,6 +121,42 @@ class JiraService:
             logger.error(f"Unexpected error creating Jira story: {e}")
             return None
 
+    def add_attachment(self, issue_key: str, attachment_path: str) -> bool:
+        """
+        Add an attachment to an existing Jira issue.
+
+        Args:
+            issue_key (str): The issue key (e.g., 'AAI-123')
+            attachment_path (str): Path to the file to attach
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            if not os.path.exists(attachment_path):
+                logger.warning(f"Attachment file not found: {attachment_path}")
+                return False
+
+            # Get the issue
+            issue = self.jira.issue(issue_key)
+
+            # Add the attachment
+            with open(attachment_path, "rb") as f:
+                self.jira.add_attachment(issue=issue, attachment=f)
+            logger.info(f"Added attachment to {issue_key}: {attachment_path}")
+
+            # Clean up temporary file
+            try:
+                os.unlink(attachment_path)
+            except Exception as e:
+                logger.warning(f"Failed to clean up temp file {attachment_path}: {e}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to add attachment to issue {issue_key}: {e}")
+            return False
+
     def get_issue_url(self, issue_key: str) -> str:
         """Get the full URL for a Jira issue."""
         return f"{Config.JIRA_URL}/browse/{issue_key}"

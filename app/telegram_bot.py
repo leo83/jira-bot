@@ -190,16 +190,11 @@ class TelegramBot:
 
             if issue_key:
                 issue_url = self.jira_service.get_issue_url(issue_key)
-                attachment_text = ""
-                if photo_attachments:
-                    attachment_text = (
-                        f"\n📎 Attachments: {len(photo_attachments)} photo(s) attached"
-                    )
 
                 await update.message.reply_text(
                     f"✅ Jira {issue_type.lower()} created successfully!\n\n"
                     f"📋 Task Key: {issue_key}\n"
-                    f"🔗 URL: {issue_url}{attachment_text}"
+                    f"🔗 URL: {issue_url}"
                 )
             else:
                 await update.message.reply_text(
@@ -258,23 +253,31 @@ class TelegramBot:
         """
         downloaded_files = []
 
-        # Since Telegram sends multiple photo objects for the same image (different sizes),
-        # we should only download the highest quality one
+        # Handle photo attachments - they may already be filtered (from media groups) or need filtering
         if not photo_attachments:
             return downloaded_files
 
-        # Find the highest quality photo (largest file_size)
-        best_photo = max(photo_attachments, key=lambda p: p.file_size or 0)
-        logger.info(
-            f"DEBUG: Selected best photo - file_size: {best_photo.file_size}, width: {best_photo.width}, height: {best_photo.height}"
-        )
-
-        # Only process the best photo
-        unique_photos = {best_photo.file_id: best_photo}
-
-        logger.info(
-            f"Processing 1 unique photo from {len(photo_attachments)} total photo objects"
-        )
+        # If we have already-filtered photos (from media group collection), use them all
+        # Otherwise, take only the last photo (highest quality) from a single message
+        if len(photo_attachments) > 1 and all(
+            hasattr(p, "file_unique_id") for p in photo_attachments
+        ):
+            # Check if these are different photos (different file_unique_id prefixes)
+            # For media groups, we already collected only the best version of each
+            unique_photos = {p.file_id: p for p in photo_attachments}
+            logger.info(
+                f"Processing {len(unique_photos)} photos from media group or attachment list"
+            )
+        else:
+            # Single message with multiple sizes of one photo - take the last (highest quality)
+            best_photo = photo_attachments[-1]
+            logger.info(
+                f"DEBUG: Selected last photo as best - file_size: {best_photo.file_size}, width: {best_photo.width}, height: {best_photo.height}"
+            )
+            logger.info(
+                f"Processing 1 photo (selecting last/highest quality) from {len(photo_attachments)} total photo objects"
+            )
+            unique_photos = {best_photo.file_id: best_photo}
 
         for i, photo in enumerate(unique_photos.values()):
             try:
@@ -351,10 +354,111 @@ class TelegramBot:
         logger.info(f"DEBUG: Message text: '{update.message.text}'")
         logger.info(f"DEBUG: Message caption: '{update.message.caption}'")
         logger.info(f"DEBUG: Has photos: {bool(update.message.photo)}")
+        logger.info(f"DEBUG: Media group ID: '{update.message.media_group_id}'")
         try:
             # Check if message exists
             if not update.message:
                 logger.warning("Received update without message")
+                return
+
+            # Check if this is part of a media group (multiple photos sent together)
+            if update.message.media_group_id:
+                logger.info(
+                    f"DEBUG: Part of media group {update.message.media_group_id}"
+                )
+
+                # Keys for tracking media groups
+                media_group_id = update.message.media_group_id
+                task_key = f"task_{media_group_id}"
+                photo_count_key = f"photo_count_{media_group_id}"
+
+                # Check if we already created a task for this media group
+                existing_task_key = context.bot_data.get(task_key)
+
+                if existing_task_key:
+                    # Task already exists, add this photo to it
+                    logger.info(
+                        f"DEBUG: Task already exists for media group {media_group_id}, adding photo"
+                    )
+
+                    if update.message.photo:
+                        best_photo = update.message.photo[-1]
+
+                        # Download and attach the photo
+                        try:
+                            photo_file = await context.bot.get_file(best_photo.file_id)
+                            photo_count = context.bot_data.get(photo_count_key, 1) + 1
+
+                            with tempfile.NamedTemporaryFile(
+                                delete=False, suffix=f"_{photo_count - 1}.jpg"
+                            ) as temp_file:
+                                temp_path = temp_file.name
+                                logger.info(
+                                    f"DEBUG: Downloading additional photo {photo_count} to {temp_path}"
+                                )
+                                await photo_file.download_to_drive(temp_path)
+
+                                # Add attachment to existing Jira task
+                                self.jira_service.add_attachment(
+                                    existing_task_key, temp_path
+                                )
+                                logger.info(
+                                    f"DEBUG: Added photo {photo_count} to task {existing_task_key}"
+                                )
+
+                                # Update photo count
+                                context.bot_data[photo_count_key] = photo_count
+
+                                # Clean up temp file
+                                import os
+
+                                try:
+                                    os.unlink(temp_path)
+                                except:
+                                    pass
+                        except Exception as e:
+                            logger.error(f"Error adding additional photo to task: {e}")
+
+                    return
+
+                # This is the first photo in the media group
+                # Create the task immediately with this photo
+                logger.info(
+                    f"DEBUG: First photo in media group {media_group_id}, creating task"
+                )
+
+                # Process the caption to extract task details
+                caption = update.message.caption or ""
+
+                if caption.startswith("/task"):
+                    logger.info("DEBUG: Found /task command in first photo caption")
+                    task_description = (
+                        " ".join(caption.split()[1:])
+                        if len(caption.split()) > 1
+                        else ""
+                    )
+                else:
+                    task_description = "Task with image attachment"
+
+                # Process and create the task with the first photo
+                if update.message.photo:
+                    # Only use the highest quality version (last one in the list)
+                    best_photo = update.message.photo[-1]
+                    photos_to_process = [best_photo]
+
+                    # Create the task and get the task key
+                    created_task_key = await self._process_task(
+                        update, task_description, photos_to_process
+                    )
+
+                    # Store the task key for this media group
+                    if created_task_key:
+                        context.bot_data[task_key] = created_task_key
+                        context.bot_data[photo_count_key] = 1
+                        logger.info(
+                            f"DEBUG: Stored task {created_task_key} for media group {media_group_id}"
+                        )
+
                 return
 
             # Check if there's a command in the caption - if so, process it directly
@@ -514,27 +618,25 @@ class TelegramBot:
 
             if issue_key:
                 issue_url = self.jira_service.get_issue_url(issue_key)
-                attachment_text = ""
-                if photo_attachments:
-                    attachment_text = (
-                        f"\n📎 Attachments: {len(photo_attachments)} photo(s) attached"
-                    )
 
                 await update.message.reply_text(
                     f"✅ Jira {issue_type.lower()} created successfully!\n\n"
                     f"📋 Task Key: {issue_key}\n"
-                    f"🔗 URL: {issue_url}{attachment_text}"
+                    f"🔗 URL: {issue_url}"
                 )
+                return issue_key
             else:
                 await update.message.reply_text(
                     f"❌ Failed to create Jira {issue_type.lower()}. Please check the bot configuration and try again."
                 )
+                return None
 
         except Exception as e:
             logger.error(f"Error in _process_task: {e}")
             await update.message.reply_text(
                 "❌ An error occurred while creating the Jira story. Please try again later."
             )
+            return None
 
     def setup_handlers(self):
         """Set up command handlers for the bot."""
