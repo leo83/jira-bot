@@ -12,3 +12,4 @@ wheels/
 # Environment variables
 .env
 helm/jira-bot/values-production.yaml
+features.md

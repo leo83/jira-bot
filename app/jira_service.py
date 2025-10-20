@@ -1,5 +1,6 @@
 import logging
-from typing import Optional
+import os
+from typing import List, Optional
 
 from jira import JIRA
 from jira.exceptions import JIRAError
@@ -40,6 +41,7 @@ class JiraService:
         description: str = None,
         component_name: str = None,
         issue_type: str = "Story",
+        attachments: List[str] = None,
     ) -> Optional[str]:
         """
         Create a new Jira issue in the AAI project with specified component and type.
@@ -49,6 +51,7 @@ class JiraService:
             description (str, optional): The issue description
             component_name (str, optional): The component name (defaults to Config.JIRA_COMPONENT_NAME)
             issue_type (str, optional): The issue type (defaults to "Story")
+            attachments (List[str], optional): List of file paths to attach to the issue
 
         Returns:
             str: The created issue key (e.g., 'AAI-123') or None if failed
@@ -89,6 +92,25 @@ class JiraService:
             # Create the issue
             new_issue = self.jira.create_issue(fields=issue_dict)
             logger.info(f"Created issue: {new_issue.key}")
+
+            # Add attachments if provided
+            if attachments:
+                try:
+                    for attachment_path in attachments:
+                        if os.path.exists(attachment_path):
+                            with open(attachment_path, "rb") as f:
+                                self.jira.add_attachment(issue=new_issue, attachment=f)
+                            logger.info(f"Added attachment: {attachment_path}")
+                            # Clean up temporary file
+                            os.unlink(attachment_path)
+                        else:
+                            logger.warning(
+                                f"Attachment file not found: {attachment_path}"
+                            )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to add attachments to issue {new_issue.key}: {e}"
+                    )
 
             return new_issue.key
 
