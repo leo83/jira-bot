@@ -43,9 +43,10 @@ class JiraService:
         issue_type: str = "Story",
         attachments: List[str] = None,
         sprint_id: int = None,
+        labels: List[str] = None,
     ) -> Optional[str]:
         """
-        Create a new Jira issue in the AAI project with specified component and type.
+        Create a new Jira issue in the configured project with specified component and type.
 
         Args:
             summary (str): The issue summary/title
@@ -54,9 +55,10 @@ class JiraService:
             issue_type (str, optional): The issue type (defaults to "Story")
             attachments (List[str], optional): List of file paths to attach to the issue
             sprint_id (int, optional): The sprint ID to add the issue to
+            labels (List[str], optional): List of labels to add to the issue
 
         Returns:
-            str: The created issue key (e.g., 'AAI-123') or None if failed
+            str: The created issue key (e.g., 'PROJ-123') or None if failed
         """
         try:
             # Get the project to verify it exists
@@ -90,6 +92,9 @@ class JiraService:
 
             if description:
                 issue_dict["description"] = description
+
+            if labels:
+                issue_dict["labels"] = labels
 
             # Create the issue
             new_issue = self.jira.create_issue(fields=issue_dict)
@@ -137,7 +142,7 @@ class JiraService:
         Add an attachment to an existing Jira issue.
 
         Args:
-            issue_key (str): The issue key (e.g., 'AAI-123')
+            issue_key (str): The issue key (e.g., 'PROJ-123')
             attachment_path (str): Path to the file to attach
 
         Returns:
@@ -173,7 +178,7 @@ class JiraService:
         Get details of a Jira issue.
 
         Args:
-            issue_key (str): The issue key (e.g., 'AAI-123' or just '123' for default project)
+            issue_key (str): The issue key (e.g., 'PROJ-123' or just '123' for default project)
 
         Returns:
             dict: Issue details including summary, description, status, attachments, etc.

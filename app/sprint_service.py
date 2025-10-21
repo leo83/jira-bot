@@ -219,7 +219,7 @@ class SprintService:
         Add an issue to a sprint.
 
         Args:
-            issue_key: The issue key (e.g., 'AAI-123')
+            issue_key: The issue key (e.g., 'PROJ-123')
             sprint_id: The sprint ID
 
         Returns:

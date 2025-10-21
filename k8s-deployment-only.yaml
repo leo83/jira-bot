@@ -35,11 +35,11 @@ spec:
               name: jira-bot-secrets
               key: jira-api-token
         - name: JIRA_URL
-          value: "https://myteam.aeroclub.ru"
+          value: "https://jira.example.com"
         - name: JIRA_PROJECT_KEY
-          value: "AAI"
+          value: "PROJ"
         - name: JIRA_COMPONENT_NAME
-          value: "org"
+          value: "default"
         - name: ALLOWED_USERS
           value: ""
         resources:

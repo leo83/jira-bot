@@ -12,13 +12,13 @@ class Config:
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
     # Jira Configuration
-    JIRA_URL = os.getenv("JIRA_URL", "https://myteam.aeroclub.ru")
+    JIRA_URL = os.getenv("JIRA_URL", "https://jira.example.com")
     JIRA_USERNAME = os.getenv("JIRA_USERNAME")
     JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN")
 
     # Project Configuration
-    JIRA_PROJECT_KEY = os.getenv("JIRA_PROJECT_KEY", "AAI")
-    JIRA_COMPONENT_NAME = os.getenv("JIRA_COMPONENT_NAME", "org")
+    JIRA_PROJECT_KEY = os.getenv("JIRA_PROJECT_KEY", "PROJ")
+    JIRA_COMPONENT_NAME = os.getenv("JIRA_COMPONENT_NAME", "default")
 
     @classmethod
     def validate(cls):

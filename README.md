@@ -1,10 +1,10 @@
 # Jira Telegram Bot
 
-A Telegram bot that creates Jira stories in the AAI project with the 'org' component.
+A Telegram bot that creates Jira stories in your Jira project with customizable components.
 
 ## Features
 
-- `/task <description>` - Creates a new Jira story in the AAI project
+- `/task <description>` - Creates a new Jira story in your configured project
 - `/help` - Shows available commands
 - `/start` - Starts the bot
 
@@ -52,9 +52,9 @@ Required environment variables:
 Optional environment variables (defaults provided):
 
 - `ALLOWED_USERS` - Comma-separated list of authorized usernames and user IDs (leave empty to allow all users)
-- `JIRA_URL` - Jira server URL (default: https://myteam.aeroclub.ru)
-- `JIRA_PROJECT_KEY` - Project key (default: AAI)
-- `JIRA_COMPONENT_NAME` - Component name (default: org)
+- `JIRA_URL` - Jira server URL (default: https://jira.example.com)
+- `JIRA_PROJECT_KEY` - Project key (default: PROJ)
+- `JIRA_COMPONENT_NAME` - Component name (default: default)
 
 ### 3. Getting Jira API Token
 
@@ -261,9 +261,9 @@ Example:
 ```
 
 The bot will create a Jira story with:
-- Project: AAI
+- Project: Your configured project (default: PROJ)
 - Issue Type: Story
-- Component: org
+- Component: Your configured component (default: default)
 - Summary: Your provided description
 
 ## Troubleshooting
@@ -279,14 +279,14 @@ The bot will create a Jira story with:
 #### Jira connection issues:
 1. Verify Jira URL is accessible
 2. Check Jira API token (Bearer authentication)
-3. Ensure the AAI project exists
-4. Verify the 'org' component exists in the project
+3. Ensure your project exists
+4. Verify your default component exists in the project
 
 **Test your Jira token:**
 ```bash
 curl -H "Accept: application/json" \
      -H "Authorization: Bearer YOUR_API_TOKEN" \
-     "https://myteam.aeroclub.ru/rest/api/2/myself"
+     "https://jira.example.com/rest/api/2/myself"
 ```
 
 #### Docker issues:
@@ -298,9 +298,9 @@ curl -H "Accept: application/json" \
 - [ ] `TELEGRAM_BOT_TOKEN` - Valid bot token from @BotFather
 - [ ] `JIRA_USERNAME` - Your Jira username
 - [ ] `JIRA_API_TOKEN` - Valid API token from Jira
-- [ ] `JIRA_URL` - Correct Jira server URL (default: https://myteam.aeroclub.ru)
-- [ ] `JIRA_PROJECT_KEY` - Project key (default: AAI)
-- [ ] `JIRA_COMPONENT_NAME` - Component name (default: org)
+- [ ] `JIRA_URL` - Correct Jira server URL (default: https://jira.example.com)
+- [ ] `JIRA_PROJECT_KEY` - Project key (default: PROJ)
+- [ ] `JIRA_COMPONENT_NAME` - Component name (default: default)
 
 ### Logs and Debugging:
 ```bash

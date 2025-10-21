@@ -84,7 +84,7 @@ class ComponentService:
                     [f"• {comp}" for comp in available_components_list]
                 )
                 message = f"❌ No close match found for '{component_label}'\n\n📋 Available components:\n{available_components}"
-                return "org", message
+                return "default", message
 
         except Exception as e:
             logger.error(f"Error in component selection for '{component_label}': {e}")
@@ -93,7 +93,7 @@ class ComponentService:
                 [f"• {comp}" for comp in available_components_list]
             )
             message = f"❌ Error processing component '{component_label}'\n\n📋 Available components:\n{available_components}"
-            return "org", message
+            return "default", message
 
     def get_available_components(self) -> list:
         """Get list of available components."""

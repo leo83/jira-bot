@@ -78,9 +78,9 @@ secrets:
 ```yaml
 config:
   jira:
-    url: "https://myteam.aeroclub.ru"
-    projectKey: "AAI"
-    componentName: "org"
+    url: "https://jira.example.com"
+    projectKey: "PROJ"
+    componentName: "default"
   allowedUsers: "user1,123456,user2,789012"
 ```
 

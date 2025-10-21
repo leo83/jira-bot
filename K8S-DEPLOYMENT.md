@@ -83,9 +83,9 @@ The deployment uses the following environment variables:
 - `TELEGRAM_BOT_TOKEN` - Your Telegram bot token (from secret)
 - `JIRA_USERNAME` - Your Jira username (from secret)
 - `JIRA_API_TOKEN` - Your Jira API token (from secret)
-- `JIRA_URL` - Jira server URL (default: https://myteam.aeroclub.ru)
-- `JIRA_PROJECT_KEY` - Project key (default: AAI)
-- `JIRA_COMPONENT_NAME` - Component name (default: org)
+- `JIRA_URL` - Jira server URL (default: https://jira.example.com)
+- `JIRA_PROJECT_KEY` - Project key (default: PROJ)
+- `JIRA_COMPONENT_NAME` - Component name (default: default)
 - `ALLOWED_USERS` - Comma-separated list of authorized users (empty = allow all)
 
 ### Resource Limits

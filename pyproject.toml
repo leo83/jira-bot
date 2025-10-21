@@ -1,7 +1,7 @@
 [project]
 name = "jira-bot"
 version = "0.1.0"
-description = "Telegram bot for creating Jira stories in AAI project"
+description = "Telegram bot for creating Jira stories in your configured Jira project"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

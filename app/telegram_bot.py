@@ -219,6 +219,33 @@ class TelegramBot:
             if should_stop:
                 return
 
+            # Prepare labels for Jira issue
+            labels = []
+            chat = update.effective_chat
+
+            # Add chat/channel name as label
+            if chat:
+                if chat.type in ["group", "supergroup", "channel"]:
+                    # For groups and channels, use the chat title
+                    if chat.title:
+                        # Clean label: replace spaces and special chars
+                        chat_label = chat.title.replace(" ", "_").replace("-", "_")
+                        labels.append(f"tg_chat:{chat_label}")
+                elif chat.type == "private":
+                    # For private chats, use "private"
+                    labels.append("tg_chat:private")
+
+            # Add username as label
+            if user:
+                if user.username:
+                    labels.append(f"tg_user:{user.username}")
+                elif user.first_name:
+                    # If no username, use first name
+                    user_label = user.first_name.replace(" ", "_").replace("-", "_")
+                    labels.append(f"tg_user:{user_label}")
+
+            logger.info(f"Adding labels to Jira issue: {labels}")
+
             # Create the Jira issue
             await update.message.reply_text(f"Creating Jira {issue_type.lower()}...")
 
@@ -247,6 +274,7 @@ class TelegramBot:
                 issue_type=issue_type,
                 attachments=attachment_files,
                 sprint_id=sprint_id,
+                labels=labels,
             )
 
             if issue_key:
@@ -279,7 +307,7 @@ class TelegramBot:
 /task <description> component: <label> - Create task with specific component
 /task <description> type: <type> - Create task with specific type (Story, Bug)
 /task desc: <description> - Use description after "desc:" as task description
-/desc <issue-key> - Get details of a Jira issue (e.g., /desc 123 or /desc AAI-123)
+/desc <issue-key> - Get details of a Jira issue (e.g., /desc 123 or /desc PROJ-123)
 /help - Show this help message
 /start - Start the bot
 /userinfo - Show your user information
@@ -289,7 +317,7 @@ class TelegramBot:
 /task Fix login bug
 /task Add new feature component: авиа-параметры
 /desc 123
-/desc AAI-456
+/desc PROJ-456
 /task Fix critical bug type: Bug
 /task desc: Implement user authentication system
 /task description: Update database schema component: devops type: Bug
@@ -435,9 +463,9 @@ class TelegramBot:
                 "❌ Please provide an issue key.\n\n"
                 "Usage: `/desc <issue-key>`\n"
                 "Examples:\n"
-                "  • `/desc 123` - Gets AAI-123\n"
-                "  • `/desc AAI-123` - Gets AAI-123\n"
-                "  • `/desc PROJ-456` - Gets PROJ-456"
+                "  • `/desc 123` - Gets PROJ-123 (uses default project)\n"
+                "  • `/desc PROJ-123` - Gets PROJ-123\n"
+                "  • `/desc OTHER-456` - Gets OTHER-456"
             )
             return
 
@@ -734,6 +762,7 @@ class TelegramBot:
         """Common task processing logic for both text and photo messages."""
         try:
             user = update.effective_user
+            chat = update.effective_chat
 
             # Parse task parameters using the helper method
             (
@@ -746,6 +775,32 @@ class TelegramBot:
             ) = await self._parse_task_parameters(task_description, update)
             if should_stop:
                 return
+
+            # Prepare labels for Jira issue
+            labels = []
+
+            # Add chat/channel name as label
+            if chat:
+                if chat.type in ["group", "supergroup", "channel"]:
+                    # For groups and channels, use the chat title
+                    if chat.title:
+                        # Clean label: replace spaces and special chars
+                        chat_label = chat.title.replace(" ", "_").replace("-", "_")
+                        labels.append(f"tg_chat:{chat_label}")
+                elif chat.type == "private":
+                    # For private chats, use "private"
+                    labels.append("tg_chat:private")
+
+            # Add username as label
+            if user:
+                if user.username:
+                    labels.append(f"tg_user:{user.username}")
+                elif user.first_name:
+                    # If no username, use first name
+                    user_label = user.first_name.replace(" ", "_").replace("-", "_")
+                    labels.append(f"tg_user:{user_label}")
+
+            logger.info(f"Adding labels to Jira issue: {labels}")
 
             # Create the Jira issue
             await update.message.reply_text(f"Creating Jira {issue_type.lower()}...")
@@ -775,6 +830,7 @@ class TelegramBot:
                 issue_type=issue_type,
                 attachments=attachment_files,
                 sprint_id=sprint_id,
+                labels=labels,
             )
 
             if issue_key:

@@ -10,13 +10,13 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
 
       # Jira Configuration
-      - JIRA_URL=${JIRA_URL:-https://myteam.aeroclub.ru}
+      - JIRA_URL=${JIRA_URL:-https://jira.example.com}
       - JIRA_USERNAME=${JIRA_USERNAME}
       - JIRA_API_TOKEN=${JIRA_API_TOKEN}
 
       # Project Configuration (optional)
-      - JIRA_PROJECT_KEY=${JIRA_PROJECT_KEY:-AAI}
-      - JIRA_COMPONENT_NAME=${JIRA_COMPONENT_NAME:-org}
+      - JIRA_PROJECT_KEY=${JIRA_PROJECT_KEY:-PROJ}
+      - JIRA_COMPONENT_NAME=${JIRA_COMPONENT_NAME:-default}
     env_file:
       - .env
     volumes:
