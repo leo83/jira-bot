@@ -43,8 +43,8 @@ class TelegramBot:
     async def _parse_task_parameters(self, task_description: str, update: Update):
         """
         Parse task parameters from task_description. Parameters can appear in any order.
-        Supported parameters: type:, component:, sprint:, desc:/description:
-        Returns: (summary, description, component_name, issue_type, sprint_id, should_stop)
+        Supported parameters: type:, component:, sprint:, desc:/description:, link:
+        Returns: (summary, description, component_name, issue_type, sprint_id, link_issue, should_stop)
         """
         import re
 
@@ -53,10 +53,11 @@ class TelegramBot:
         component_name = Config.JIRA_COMPONENT_NAME
         jira_description = None
         sprint_id = None
+        link_issue = None
 
-        # Pattern to find all parameters: type:, component:, sprint:, desc:, description:
+        # Pattern to find all parameters: type:, component:, sprint:, desc:, description:, link:
         # This captures the parameter name and value up to the next parameter keyword
-        param_pattern = r"(type:|component:|sprint:|desc:|description:)\s*(.+?)(?=\s+(?:type:|component:|sprint:|desc:|description:)|$)"
+        param_pattern = r"(type:|component:|sprint:|desc:|description:|link:)\s*(.+?)(?=\s+(?:type:|component:|sprint:|desc:|description:|link:)|$)"
 
         matches = list(re.finditer(param_pattern, task_description, re.IGNORECASE))
 
@@ -130,6 +131,14 @@ class TelegramBot:
                 jira_description = params["description"]
                 logger.info(f"Extracted Jira description: '{jira_description}'")
 
+            # Process link parameter
+            if "link" in params:
+                link_issue = params["link"].strip()
+                # If only digits, prepend project key
+                if link_issue.isdigit():
+                    link_issue = f"{Config.JIRA_PROJECT_KEY}-{link_issue}"
+                logger.info(f"Extracted link issue: '{link_issue}'")
+
             # Use summary from what's left after removing parameters
             task_description = summary
             logger.info(f"Task summary: '{task_description}'")
@@ -148,6 +157,7 @@ class TelegramBot:
             component_name,
             issue_type,
             sprint_id,
+            link_issue,
             False,
         )
 
@@ -214,6 +224,7 @@ class TelegramBot:
                 component_name,
                 issue_type,
                 sprint_id,
+                link_issue,
                 should_stop,
             ) = await self._parse_task_parameters(task_description, update)
             if should_stop:
@@ -280,6 +291,18 @@ class TelegramBot:
             if issue_key:
                 issue_url = self.jira_service.get_issue_url(issue_key)
 
+                # Link to another issue if specified
+                if link_issue:
+                    link_success = self.jira_service.link_issues(
+                        inward_issue=issue_key, outward_issue=link_issue
+                    )
+                    if link_success:
+                        logger.info(f"Successfully linked {issue_key} to {link_issue}")
+                    else:
+                        await update.message.reply_text(
+                            f"⚠️ Created task but failed to link to {link_issue}. Please check the issue key."
+                        )
+
                 await update.message.reply_text(
                     f"✅ Jira {issue_type.lower()} created successfully!\n\n"
                     f"📋 Task Key: {issue_key}\n"
@@ -306,6 +329,8 @@ class TelegramBot:
 /task <description> - Create a new Jira task
 /task <description> component: <label> - Create task with specific component
 /task <description> type: <type> - Create task with specific type (Story, Bug)
+/task <description> sprint: <query> - Add task to a specific sprint
+/task <description> link: <issue-key> - Link to another Jira issue
 /task desc: <description> - Use description after "desc:" as task description
 /desc <issue-key> - Get details of a Jira issue (e.g., /desc 123 or /desc PROJ-123)
 /help - Show this help message
@@ -320,14 +345,18 @@ class TelegramBot:
 /desc PROJ-456
 /task Fix critical bug type: Bug
 /task desc: Implement user authentication system
-/task description: Update database schema component: devops type: Bug
+/task Update schema component: devops type: Bug sprint: s3 agent
+/task Fix related issue link: 2825
 
 💡 Features:
 • Component matching uses transliteration and fuzzy matching for Russian labels
 • Components are fetched dynamically from Jira (DEPRECATED components are filtered out)
+• Sprint matching uses fuzzy matching (e.g., "s3 agent" matches "2025Q4-S3_агент")
+• Link parameter creates "Relates" link to specified issue (e.g., link: 123 or link: PROJ-123)
 • Available issue types: Story, Bug
 • If no close component match is found, you'll see available components list
 • Image attachments are automatically added to Jira tasks
+• All parameters (type, component, sprint, link, desc) can appear in any order
         """
         await update.message.reply_text(help_text)
 
@@ -771,6 +800,7 @@ class TelegramBot:
                 component_name,
                 issue_type,
                 sprint_id,
+                link_issue,
                 should_stop,
             ) = await self._parse_task_parameters(task_description, update)
             if should_stop:
@@ -835,6 +865,18 @@ class TelegramBot:
 
             if issue_key:
                 issue_url = self.jira_service.get_issue_url(issue_key)
+
+                # Link to another issue if specified
+                if link_issue:
+                    link_success = self.jira_service.link_issues(
+                        inward_issue=issue_key, outward_issue=link_issue
+                    )
+                    if link_success:
+                        logger.info(f"Successfully linked {issue_key} to {link_issue}")
+                    else:
+                        await update.message.reply_text(
+                            f"⚠️ Created task but failed to link to {link_issue}. Please check the issue key."
+                        )
 
                 await update.message.reply_text(
                     f"✅ Jira {issue_type.lower()} created successfully!\n\n"

@@ -173,6 +173,42 @@ class JiraService:
             logger.error(f"Failed to add attachment to issue {issue_key}: {e}")
             return False
 
+    def link_issues(
+        self, inward_issue: str, outward_issue: str, link_type: str = "Relates"
+    ) -> bool:
+        """
+        Create a link between two Jira issues.
+
+        Args:
+            inward_issue (str): The issue key that will be linked (e.g., 'PROJ-123')
+            outward_issue (str): The issue key to link to (e.g., 'PROJ-456')
+            link_type (str): The type of link (default: "Relates")
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # If only digits provided, prepend default project key
+            if inward_issue.isdigit():
+                inward_issue = f"{self.project_key}-{inward_issue}"
+            if outward_issue.isdigit():
+                outward_issue = f"{self.project_key}-{outward_issue}"
+
+            # Create the link
+            self.jira.create_issue_link(
+                type=link_type,
+                inwardIssue=inward_issue,
+                outwardIssue=outward_issue,
+            )
+            logger.info(f"Created link: {inward_issue} {link_type} {outward_issue}")
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"Failed to link issues {inward_issue} -> {outward_issue}: {e}"
+            )
+            return False
+
     def get_issue(self, issue_key: str) -> Optional[dict]:
         """
         Get details of a Jira issue.
