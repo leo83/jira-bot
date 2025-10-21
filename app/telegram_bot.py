@@ -161,6 +161,189 @@ class TelegramBot:
             False,
         )
 
+    async def _process_bug_or_story(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, task_description: str
+    ):
+        """Common processing logic for /bug and /story commands."""
+        try:
+            # Check user permissions
+            user = update.effective_user
+            if not UserConfig.is_user_allowed(user.username, user.id):
+                await update.message.reply_text(
+                    "❌ Access denied. You are not authorized to create Jira tasks.\n"
+                    f"Contact administrator to get access."
+                )
+                logger.warning(
+                    f"Unauthorized access attempt by user: {user.username} (ID: {user.id})"
+                )
+                return
+
+            # Check for photo attachments
+            photo_attachments = []
+            if update.message.photo:
+                photo_attachments = update.message.photo
+                logger.info(f"Found {len(photo_attachments)} photo attachments")
+
+            # Parse task parameters using the helper method
+            (
+                task_description,
+                jira_description,
+                component_name,
+                issue_type,
+                sprint_id,
+                link_issue,
+                should_stop,
+            ) = await self._parse_task_parameters(task_description, update)
+            if should_stop:
+                return
+
+            # Prepare labels for Jira issue
+            labels = []
+            chat = update.effective_chat
+
+            # Add chat/channel name as label
+            if chat:
+                if chat.type in ["group", "supergroup", "channel"]:
+                    # For groups and channels, use the chat title
+                    if chat.title:
+                        # Clean label: replace spaces and special chars
+                        chat_label = chat.title.replace(" ", "_").replace("-", "_")
+                        labels.append(f"tg_chat:{chat_label}")
+                elif chat.type == "private":
+                    # For private chats, use "private"
+                    labels.append("tg_chat:private")
+
+            # Add username as label
+            if user:
+                if user.username:
+                    labels.append(f"tg_user:{user.username}")
+                elif user.first_name:
+                    # If no username, use first name
+                    user_label = user.first_name.replace(" ", "_").replace("-", "_")
+                    labels.append(f"tg_user:{user_label}")
+
+            logger.info(f"Adding labels to Jira issue: {labels}")
+
+            # Create the Jira issue
+            await update.message.reply_text(f"Creating Jira {issue_type.lower()}...")
+
+            # Prepare description for Jira
+            if jira_description:
+                final_description = jira_description
+            else:
+                final_description = f"Created via Telegram bot by user {user.username or user.first_name}"
+
+            # Download photo attachments if any
+            attachment_files = []
+            if photo_attachments:
+                try:
+                    attachment_files = await self._download_photos(photo_attachments)
+                    logger.info(f"Downloaded {len(attachment_files)} photo attachments")
+                except Exception as e:
+                    logger.error(f"Failed to download photo attachments: {e}")
+                    await update.message.reply_text(
+                        "⚠️ Warning: Failed to download some photo attachments. Creating task without them."
+                    )
+
+            issue_key = self.jira_service.create_story(
+                summary=task_description,
+                description=final_description,
+                component_name=component_name,
+                issue_type=issue_type,
+                attachments=attachment_files,
+                sprint_id=sprint_id,
+                labels=labels,
+            )
+
+            if issue_key:
+                issue_url = self.jira_service.get_issue_url(issue_key)
+
+                # Link to another issue if specified
+                if link_issue:
+                    link_success = self.jira_service.link_issues(
+                        inward_issue=issue_key, outward_issue=link_issue
+                    )
+                    if link_success:
+                        logger.info(f"Successfully linked {issue_key} to {link_issue}")
+                    else:
+                        await update.message.reply_text(
+                            f"⚠️ Created task but failed to link to {link_issue}. Please check the issue key."
+                        )
+
+                await update.message.reply_text(
+                    f"✅ Jira {issue_type.lower()} created successfully!\n\n"
+                    f"📋 Task Key: {issue_key}\n"
+                    f"🔗 URL: {issue_url}"
+                )
+            else:
+                await update.message.reply_text(
+                    f"❌ Failed to create Jira {issue_type.lower()}. Please check the bot configuration and try again."
+                )
+
+        except Exception as e:
+            logger.error(f"Error in _process_bug_or_story: {e}")
+            await update.message.reply_text(
+                "❌ An error occurred while creating the Jira task. Please try again later."
+            )
+
+    async def bug_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle the /bug command as a shortcut for creating a bug."""
+        logger.info("DEBUG: bug_command triggered")
+        # Get the task description and force type to Bug
+        if update.message and update.message.text:
+            # Get everything after /bug
+            parts = update.message.text.split(maxsplit=1)
+            if len(parts) > 1:
+                task_description = parts[1]
+                # Remove type: parameter if it exists (it will be ignored)
+                import re
+
+                task_description = re.sub(
+                    r"\btype:\s*\w+", "", task_description, flags=re.IGNORECASE
+                ).strip()
+                # Add type: Bug to the description
+                task_description = f"{task_description} type: Bug".strip()
+            else:
+                task_description = "type: Bug"
+
+            # Process as task command with modified description
+            await self._process_bug_or_story(update, context, task_description)
+        else:
+            await update.message.reply_text(
+                "❌ Please provide a bug description.\n\n"
+                "📝 Usage: `/bug <description>`\n"
+                "Example: `/bug Login fails on mobile`"
+            )
+
+    async def story_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle the /story command as a shortcut for creating a story."""
+        logger.info("DEBUG: story_command triggered")
+        # Get the task description and force type to Story
+        if update.message and update.message.text:
+            # Get everything after /story
+            parts = update.message.text.split(maxsplit=1)
+            if len(parts) > 1:
+                task_description = parts[1]
+                # Remove type: parameter if it exists (it will be ignored)
+                import re
+
+                task_description = re.sub(
+                    r"\btype:\s*\w+", "", task_description, flags=re.IGNORECASE
+                ).strip()
+                # Add type: Story to the description
+                task_description = f"{task_description} type: Story".strip()
+            else:
+                task_description = "type: Story"
+
+            # Process as task command with modified description
+            await self._process_bug_or_story(update, context, task_description)
+        else:
+            await update.message.reply_text(
+                "❌ Please provide a story description.\n\n"
+                "📝 Usage: `/story <description>`\n"
+                "Example: `/story Add new dashboard feature`"
+            )
+
     async def task_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /task command to create a Jira story."""
         logger.info("DEBUG: task_command triggered")
@@ -327,6 +510,8 @@ class TelegramBot:
 🤖 Jira Bot Commands:
 
 /task <description> - Create a new Jira task
+/bug <description> - Create a bug (shortcut for /task with type: Bug)
+/story <description> - Create a story (shortcut for /task with type: Story)
 /task <description> component: <label> - Create task with specific component
 /task <description> type: <type> - Create task with specific type (Story, Bug)
 /task <description> sprint: <query> - Add task to a specific sprint
@@ -340,13 +525,15 @@ class TelegramBot:
 
 📝 Examples:
 /task Fix login bug
-/task Add new feature component: авиа-параметры
+/bug Critical authentication error
+/story Add new dashboard component: авиа-параметры
 /desc 123
 /desc PROJ-456
 /task Fix critical bug type: Bug
-/task desc: Implement user authentication system
+/bug Login issue component: авиа-параметры sprint: active
+/story desc: Implement user authentication system
 /task Update schema component: devops type: Bug sprint: s3 agent
-/task Fix related issue link: 2825
+/bug Fix related issue link: 2825
 
 💡 Features:
 • Component matching uses transliteration and fuzzy matching for Russian labels
@@ -354,6 +541,7 @@ class TelegramBot:
 • Sprint matching uses fuzzy matching (e.g., "s3 agent" matches "2025Q4-S3_агент")
 • Link parameter creates "Relates" link to specified issue (e.g., link: 123 or link: PROJ-123)
 • Available issue types: Story, Bug
+• /bug and /story commands ignore any type: parameter in the description
 • If no close component match is found, you'll see available components list
 • Image attachments are automatically added to Jira tasks
 • All parameters (type, component, sprint, link, desc) can appear in any order
@@ -719,14 +907,37 @@ class TelegramBot:
                 # Process the caption to extract task details
                 caption = update.message.caption or ""
 
-                # Only create task if there's a /task command
-                if caption.startswith("/task"):
-                    logger.info("DEBUG: Found /task command in first photo caption")
+                # Only create task if there's a /task, /bug, or /story command
+                if (
+                    caption.startswith("/task")
+                    or caption.startswith("/bug")
+                    or caption.startswith("/story")
+                ):
+                    command = caption.split()[0]
+                    logger.info(
+                        f"DEBUG: Found {command} command in first photo caption"
+                    )
+
+                    # Extract description after command
                     task_description = (
                         " ".join(caption.split()[1:])
                         if len(caption.split()) > 1
                         else ""
                     )
+
+                    # Add type parameter for /bug and /story
+                    import re
+
+                    if command == "/bug":
+                        task_description = re.sub(
+                            r"\btype:\s*\w+", "", task_description, flags=re.IGNORECASE
+                        ).strip()
+                        task_description = f"{task_description} type: Bug".strip()
+                    elif command == "/story":
+                        task_description = re.sub(
+                            r"\btype:\s*\w+", "", task_description, flags=re.IGNORECASE
+                        ).strip()
+                        task_description = f"{task_description} type: Story".strip()
 
                     # Process and create the task with the first photo
                     if update.message.photo:
@@ -747,24 +958,42 @@ class TelegramBot:
                                 f"DEBUG: Stored task {created_task_key} for media group {media_group_id}"
                             )
                 else:
-                    # No /task command, just ignore the photo
-                    logger.info(
-                        "DEBUG: Media group photo without /task command - ignoring"
-                    )
+                    # No command, just ignore the photo
+                    logger.info("DEBUG: Media group photo without command - ignoring")
 
                 return
 
             # Check if there's a command in the caption - if so, process it directly
             caption = update.message.caption or ""
-            if caption.startswith("/task"):
+            if (
+                caption.startswith("/task")
+                or caption.startswith("/bug")
+                or caption.startswith("/story")
+            ):
+                command = caption.split()[0]
                 logger.info(
-                    "DEBUG: Found /task command in caption, processing directly"
+                    f"DEBUG: Found {command} command in caption, processing directly"
                 )
 
-                # Extract task description from caption (everything after /task)
+                # Extract task description from caption (everything after command)
                 task_description = (
                     " ".join(caption.split()[1:]) if len(caption.split()) > 1 else ""
                 )
+
+                # Add type parameter for /bug and /story
+                import re
+
+                if command == "/bug":
+                    task_description = re.sub(
+                        r"\btype:\s*\w+", "", task_description, flags=re.IGNORECASE
+                    ).strip()
+                    task_description = f"{task_description} type: Bug".strip()
+                elif command == "/story":
+                    task_description = re.sub(
+                        r"\btype:\s*\w+", "", task_description, flags=re.IGNORECASE
+                    ).strip()
+                    task_description = f"{task_description} type: Story".strip()
+
                 logger.info(
                     f"DEBUG: Task description from caption: '{task_description}'"
                 )
@@ -775,8 +1004,8 @@ class TelegramBot:
                 await self._process_task(update, task_description, best_photo)
                 return
 
-            # If photo doesn't have /task command, ignore it (just a regular photo message)
-            logger.info("DEBUG: Photo without /task command - ignoring")
+            # If photo doesn't have /task, /bug, or /story command, ignore it (just a regular photo message)
+            logger.info("DEBUG: Photo without command - ignoring")
             return
 
         except Exception as e:
@@ -901,6 +1130,8 @@ class TelegramBot:
         """Set up command handlers for the bot."""
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("task", self.task_command))
+        self.application.add_handler(CommandHandler("bug", self.bug_command))
+        self.application.add_handler(CommandHandler("story", self.story_command))
         self.application.add_handler(CommandHandler("desc", self.desc_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("userinfo", self.userinfo_command))
