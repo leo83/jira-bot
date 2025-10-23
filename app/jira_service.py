@@ -44,6 +44,7 @@ class JiraService:
         attachments: List[str] = None,
         sprint_id: int = None,
         labels: List[str] = None,
+        project_key: str = None,
     ) -> Optional[str]:
         """
         Create a new Jira issue in the configured project with specified component and type.
@@ -56,20 +57,25 @@ class JiraService:
             attachments (List[str], optional): List of file paths to attach to the issue
             sprint_id (int, optional): The sprint ID to add the issue to
             labels (List[str], optional): List of labels to add to the issue
+            project_key (str, optional): The project key (defaults to Config.JIRA_PROJECT_KEY)
 
         Returns:
             str: The created issue key (e.g., 'PROJ-123') or None if failed
         """
         try:
+            # Use provided project key or default to Config.JIRA_PROJECT_KEY
+            if not project_key:
+                project_key = Config.JIRA_PROJECT_KEY
+
             # Get the project to verify it exists
-            project = self.jira.project(Config.JIRA_PROJECT_KEY)
-            logger.info(f"Found project: {project.name}")
+            project = self.jira.project(project_key)
+            logger.info(f"Found project: {project.name} (Key: {project_key})")
 
             # Use provided component name or default to Config.JIRA_COMPONENT_NAME
             target_component = component_name or Config.JIRA_COMPONENT_NAME
 
             # Get the component ID for the target component
-            components = self.jira.project_components(Config.JIRA_PROJECT_KEY)
+            components = self.jira.project_components(project_key)
             target_component_obj = None
             for component in components:
                 if component.name == target_component:
@@ -78,13 +84,13 @@ class JiraService:
 
             if not target_component_obj:
                 logger.error(
-                    f"Component '{target_component}' not found in project {Config.JIRA_PROJECT_KEY}"
+                    f"Component '{target_component}' not found in project {project_key}"
                 )
                 return None
 
             # Prepare issue data
             issue_dict = {
-                "project": {"key": Config.JIRA_PROJECT_KEY},
+                "project": {"key": project_key},
                 "summary": summary,
                 "issuetype": {"name": issue_type},
                 "components": [{"name": target_component}],

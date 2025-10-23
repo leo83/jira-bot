@@ -43,8 +43,8 @@ class TelegramBot:
     async def _parse_task_parameters(self, task_description: str, update: Update):
         """
         Parse task parameters from task_description. Parameters can appear in any order.
-        Supported parameters: type:, component:, sprint:, desc:/description:, link:
-        Returns: (summary, description, component_name, issue_type, sprint_id, link_issue, should_stop)
+        Supported parameters: type:, component:, sprint:, desc:/description:, link:, project:
+        Returns: (summary, description, component_name, issue_type, sprint_id, link_issue, project_key, should_stop)
         """
         import re
 
@@ -54,10 +54,11 @@ class TelegramBot:
         jira_description = None
         sprint_id = None
         link_issue = None
+        project_key = Config.JIRA_PROJECT_KEY
 
-        # Pattern to find all parameters: type:, component:, sprint:, desc:, description:, link:
+        # Pattern to find all parameters: type:, component:, sprint:, desc:, description:, link:, project:
         # This captures the parameter name and value up to the next parameter keyword
-        param_pattern = r"(type:|component:|sprint:|desc:|description:|link:)\s*(.+?)(?=\s+(?:type:|component:|sprint:|desc:|description:|link:)|$)"
+        param_pattern = r"(type:|component:|sprint:|desc:|description:|link:|project:)\s*(.+?)(?=\s+(?:type:|component:|sprint:|desc:|description:|link:|project:)|$)"
 
         matches = list(re.finditer(param_pattern, task_description, re.IGNORECASE))
 
@@ -136,8 +137,13 @@ class TelegramBot:
                 link_issue = params["link"].strip()
                 # If only digits, prepend project key
                 if link_issue.isdigit():
-                    link_issue = f"{Config.JIRA_PROJECT_KEY}-{link_issue}"
+                    link_issue = f"{project_key}-{link_issue}"
                 logger.info(f"Extracted link issue: '{link_issue}'")
+
+            # Process project parameter
+            if "project" in params:
+                project_key = params["project"].strip().upper()
+                logger.info(f"Using custom project: '{project_key}'")
 
             # Use summary from what's left after removing parameters
             task_description = summary
@@ -158,6 +164,7 @@ class TelegramBot:
             issue_type,
             sprint_id,
             link_issue,
+            project_key,
             False,
         )
 
@@ -192,6 +199,7 @@ class TelegramBot:
                 issue_type,
                 sprint_id,
                 link_issue,
+                project_key,
                 should_stop,
             ) = await self._parse_task_parameters(task_description, update)
             if should_stop:
@@ -253,6 +261,7 @@ class TelegramBot:
                 attachments=attachment_files,
                 sprint_id=sprint_id,
                 labels=labels,
+                project_key=project_key,
             )
 
             if issue_key:
@@ -408,6 +417,7 @@ class TelegramBot:
                 issue_type,
                 sprint_id,
                 link_issue,
+                project_key,
                 should_stop,
             ) = await self._parse_task_parameters(task_description, update)
             if should_stop:
@@ -469,6 +479,7 @@ class TelegramBot:
                 attachments=attachment_files,
                 sprint_id=sprint_id,
                 labels=labels,
+                project_key=project_key,
             )
 
             if issue_key:
@@ -516,6 +527,7 @@ class TelegramBot:
 /task <description> type: <type> - Create task with specific type (Story, Bug)
 /task <description> sprint: <query> - Add task to a specific sprint
 /task <description> link: <issue-key> - Link to another Jira issue
+/task <description> project: <key> - Create task in a specific project (default: AAI)
 /task desc: <description> - Use description after "desc:" as task description
 /desc <issue-key> - Get details of a Jira issue (e.g., /desc 123 or /desc PROJ-123)
 /help - Show this help message
@@ -534,6 +546,7 @@ class TelegramBot:
 /story desc: Implement user authentication system
 /task Update schema component: devops type: Bug sprint: s3 agent
 /bug Fix related issue link: 2825
+/task Create new feature project: PROJ component: frontend
 
 💡 Features:
 • Component matching uses transliteration and fuzzy matching for Russian labels
@@ -1030,6 +1043,7 @@ class TelegramBot:
                 issue_type,
                 sprint_id,
                 link_issue,
+                project_key,
                 should_stop,
             ) = await self._parse_task_parameters(task_description, update)
             if should_stop:
@@ -1090,6 +1104,7 @@ class TelegramBot:
                 attachments=attachment_files,
                 sprint_id=sprint_id,
                 labels=labels,
+                project_key=project_key,
             )
 
             if issue_key:
