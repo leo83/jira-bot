@@ -58,9 +58,13 @@ class TelegramBot:
 
         # Pattern to find all parameters: type:, component:, sprint:, desc:, description:, link:, project:
         # This captures the parameter name and value up to the next parameter keyword
-        param_pattern = r"(type:|component:|sprint:|desc:|description:|link:|project:)\s*(.+?)(?=\s+(?:type:|component:|sprint:|desc:|description:|link:|project:)|$)"
+        # re.DOTALL allows . to match newlines so desc: can contain multi-line text
+        # The lookahead stops at word boundary before next parameter keyword (no space required)
+        param_pattern = r"(type:|component:|sprint:|desc:|description:|link:|project:)\s*(.+?)(?=\s*\b(?:type:|component:|sprint:|desc:|description:|link:|project:)|$)"
 
-        matches = list(re.finditer(param_pattern, task_description, re.IGNORECASE))
+        matches = list(
+            re.finditer(param_pattern, task_description, re.IGNORECASE | re.DOTALL)
+        )
 
         if matches:
             # Extract parameters
@@ -83,6 +87,11 @@ class TelegramBot:
                 summary = summary[: match.start()] + summary[match.end() :]
             summary = summary.strip()
 
+            # Process project parameter first (before component and link parameters need it)
+            if "project" in params:
+                project_key = params["project"].strip().upper()
+                logger.info(f"Using custom project: '{project_key}'")
+
             # Process type parameter
             if "type" in params:
                 issue_type_label = params["type"]
@@ -95,21 +104,21 @@ class TelegramBot:
 
                 if issue_type_message:
                     await update.message.reply_text(issue_type_message)
-                    return None, None, None, None, None, True
+                    return None, None, None, None, None, None, None, True
 
-            # Process component parameter
+            # Process component parameter (needs project_key)
             if "component" in params:
                 component_label = params["component"]
                 component_name, component_message = (
-                    self.component_service.find_component(component_label)
+                    self.component_service.find_component(component_label, project_key)
                 )
                 logger.info(
-                    f"Selected component '{component_name}' for label '{component_label}'"
+                    f"Selected component '{component_name}' for label '{component_label}' in project '{project_key}'"
                 )
 
                 if component_message:
                     await update.message.reply_text(component_message)
-                    return None, None, None, None, None, True
+                    return None, None, None, None, None, None, None, True
 
             # Process sprint parameter
             if "sprint" in params:
@@ -121,7 +130,7 @@ class TelegramBot:
                 if sprint_message:
                     # Error or ambiguity - notify user
                     await update.message.reply_text(sprint_message)
-                    return None, None, None, None, None, True
+                    return None, None, None, None, None, None, None, True
 
                 logger.info(
                     f"Selected sprint ID: {sprint_id} for query '{sprint_query}'"
@@ -140,11 +149,6 @@ class TelegramBot:
                     link_issue = f"{project_key}-{link_issue}"
                 logger.info(f"Extracted link issue: '{link_issue}'")
 
-            # Process project parameter
-            if "project" in params:
-                project_key = params["project"].strip().upper()
-                logger.info(f"Using custom project: '{project_key}'")
-
             # Use summary from what's left after removing parameters
             task_description = summary
             logger.info(f"Task summary: '{task_description}'")
@@ -156,6 +160,18 @@ class TelegramBot:
                 logger.info(
                     f"Summary was empty, using description as summary: '{task_description}'"
                 )
+
+            # Clean summary: remove newlines and extra whitespace (Jira doesn't allow newlines in summary)
+            if task_description:
+                task_description = " ".join(task_description.split())
+                logger.info(f"Cleaned summary (removed newlines): '{task_description}'")
+
+            # Truncate summary to 255 characters (Jira limit)
+            if task_description and len(task_description) > 255:
+                logger.warning(
+                    f"Summary too long ({len(task_description)} chars), truncating to 255 chars"
+                )
+                task_description = task_description[:252] + "..."
 
         return (
             task_description,
@@ -253,7 +269,7 @@ class TelegramBot:
                         "⚠️ Warning: Failed to download some photo attachments. Creating task without them."
                     )
 
-            issue_key = self.jira_service.create_story(
+            issue_key, error_message = self.jira_service.create_story(
                 summary=task_description,
                 description=final_description,
                 component_name=component_name,
@@ -263,6 +279,11 @@ class TelegramBot:
                 labels=labels,
                 project_key=project_key,
             )
+
+            if error_message:
+                # If there's an error message, send it to the user
+                await update.message.reply_text(error_message)
+                return
 
             if issue_key:
                 issue_url = self.jira_service.get_issue_url(issue_key)
@@ -471,7 +492,7 @@ class TelegramBot:
                         "⚠️ Warning: Failed to download some photo attachments. Creating task without them."
                     )
 
-            issue_key = self.jira_service.create_story(
+            issue_key, error_message = self.jira_service.create_story(
                 summary=task_description,
                 description=final_description,
                 component_name=component_name,
@@ -481,6 +502,11 @@ class TelegramBot:
                 labels=labels,
                 project_key=project_key,
             )
+
+            if error_message:
+                # If there's an error message, send it to the user
+                await update.message.reply_text(error_message)
+                return
 
             if issue_key:
                 issue_url = self.jira_service.get_issue_url(issue_key)
@@ -547,17 +573,20 @@ class TelegramBot:
 /task Update schema component: devops type: Bug sprint: s3 agent
 /bug Fix related issue link: 2825
 /task Create new feature project: PROJ component: frontend
+/bug Database error project: SV component: backend sprint: active
+/story New UI feature project: DESIGN component: frontend
 
 💡 Features:
 • Component matching uses transliteration and fuzzy matching for Russian labels
 • Components are fetched dynamically from Jira (DEPRECATED components are filtered out)
 • Sprint matching uses fuzzy matching (e.g., "s3 agent" matches "2025Q4-S3_агент")
 • Link parameter creates "Relates" link to specified issue (e.g., link: 123 or link: PROJ-123)
+• Project parameter allows creating tasks in any Jira project (default: AAI)
 • Available issue types: Story, Bug
-• /bug and /story commands ignore any type: parameter in the description
+• /bug and /story commands ignore any type: parameter but support all other parameters (component, sprint, link, project, desc)
 • If no close component match is found, you'll see available components list
-• Image attachments are automatically added to Jira tasks
-• All parameters (type, component, sprint, link, desc) can appear in any order
+• Image attachments are automatically added to Jira tasks (works with /task, /bug, and /story)
+• All parameters (type, component, sprint, link, project, desc) can appear in any order
         """
         await update.message.reply_text(help_text)
 
@@ -1096,7 +1125,7 @@ class TelegramBot:
                         "⚠️ Warning: Failed to download some photo attachments. Creating task without them."
                     )
 
-            issue_key = self.jira_service.create_story(
+            issue_key, error_message = self.jira_service.create_story(
                 summary=task_description,
                 description=final_description,
                 component_name=component_name,
@@ -1106,6 +1135,11 @@ class TelegramBot:
                 labels=labels,
                 project_key=project_key,
             )
+
+            if error_message:
+                # If there's an error message, send it to the user
+                await update.message.reply_text(error_message)
+                return
 
             if issue_key:
                 issue_url = self.jira_service.get_issue_url(issue_key)

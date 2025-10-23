@@ -45,7 +45,7 @@ class JiraService:
         sprint_id: int = None,
         labels: List[str] = None,
         project_key: str = None,
-    ) -> Optional[str]:
+    ) -> tuple[Optional[str], Optional[str]]:
         """
         Create a new Jira issue in the configured project with specified component and type.
 
@@ -60,7 +60,8 @@ class JiraService:
             project_key (str, optional): The project key (defaults to Config.JIRA_PROJECT_KEY)
 
         Returns:
-            str: The created issue key (e.g., 'PROJ-123') or None if failed
+            tuple: (issue_key, error_message) - issue_key is the created issue key (e.g., 'PROJ-123') or None if failed,
+                   error_message contains user-friendly error message if creation failed
         """
         try:
             # Use provided project key or default to Config.JIRA_PROJECT_KEY
@@ -83,10 +84,18 @@ class JiraService:
                     break
 
             if not target_component_obj:
-                logger.error(
-                    f"Component '{target_component}' not found in project {project_key}"
+                # Get list of all available components for error message
+                available_components = [comp.name for comp in components]
+                error_msg = (
+                    f"❌ Component '{target_component}' not found in project {project_key}.\n\n"
+                    f"📋 Available components:\n" + 
+                    "\n".join([f"• {comp}" for comp in sorted(available_components)])
                 )
-                return None
+                logger.error(
+                    f"Component '{target_component}' not found in project {project_key}. "
+                    f"Available components: {', '.join(available_components)}"
+                )
+                return None, error_msg
 
             # Prepare issue data
             issue_dict = {
@@ -134,14 +143,16 @@ class JiraService:
                         f"Failed to add attachments to issue {new_issue.key}: {e}"
                     )
 
-            return new_issue.key
+            return new_issue.key, None
 
         except JIRAError as e:
+            error_msg = f"❌ Failed to create Jira issue: {str(e)}"
             logger.error(f"Failed to create Jira story: {e}")
-            return None
+            return None, error_msg
         except Exception as e:
+            error_msg = f"❌ Unexpected error creating Jira issue: {str(e)}"
             logger.error(f"Unexpected error creating Jira story: {e}")
-            return None
+            return None, error_msg
 
     def add_attachment(self, issue_key: str, attachment_path: str) -> bool:
         """
