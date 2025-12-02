@@ -13,6 +13,7 @@ from telegram.ext import (
 
 from .component_service import ComponentService
 from .config import Config
+from .database_service import DatabaseService
 from .issue_type_service import IssueTypeService
 from .jira_service import JiraService
 from .sprint_service import SprintService
@@ -29,6 +30,7 @@ class TelegramBot:
         self.jira_service = JiraService()
         self.component_service = ComponentService(self.jira_service)
         self.sprint_service = SprintService(self.jira_service.jira)
+        self.database_service = DatabaseService()
         self.application = None
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -556,6 +558,7 @@ class TelegramBot:
 /task <description> project: <key> - Create task in a specific project (default: AAI)
 /task desc: <description> - Use description after "desc:" as task description
 /desc <issue-key> - Get details of a Jira issue (e.g., /desc 123 or /desc PROJ-123)
+/link message_ref: <uuid> jira: <key> - Store message reference and Jira issue link
 /help - Show this help message
 /start - Start the bot
 /userinfo - Show your user information
@@ -567,6 +570,7 @@ class TelegramBot:
 /story Add new dashboard component: авиа-параметры
 /desc 123
 /desc PROJ-456
+/link message_ref: 550e8400-e29b-41d4-a716-446655440000 jira: AAI-1020
 /task Fix critical bug type: Bug
 /bug Login issue component: авиа-параметры sprint: active
 /story desc: Implement user authentication system
@@ -695,6 +699,110 @@ class TelegramBot:
         """
 
         await update.message.reply_text(admin_info)
+
+    async def link_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle the /link command to store message reference and Jira key in database."""
+        if not update.message:
+            return
+
+        user = update.effective_user
+
+        # Check user permissions
+        if not UserConfig.is_user_allowed(user.username, user.id):
+            await update.message.reply_text(
+                "❌ Access denied. You are not authorized to use this command."
+            )
+            logger.warning(
+                f"Unauthorized access attempt by user: {user.username} (ID: {user.id})"
+            )
+            return
+
+        # Parse command arguments
+        message_text = update.message.text or ""
+        parts = message_text.split(maxsplit=1)
+
+        if len(parts) < 2:
+            await update.message.reply_text(
+                "❌ Please provide parameters.\n\n"
+                "Usage: `/link message_ref: <uuid> jira: <issue-key>`\n"
+                "Examples:\n"
+                "  • `/link message_ref: 550e8400-e29b-41d4-a716-446655440000 jira: AAI-1020`\n"
+                "  • `/link message_ref: 123e4567-e89b-12d3-a456-426614174000 jira: SV-4403`"
+            )
+            return
+
+        # Extract parameters using regex
+        import re
+
+        param_text = parts[1]
+        message_ref = None
+        jira_key = None
+
+        # Pattern to extract message_ref and jira parameters
+        message_ref_match = re.search(
+            r"message_ref:\s*([a-fA-F0-9\-]+)", param_text, re.IGNORECASE
+        )
+        jira_match = re.search(r"jira:\s*([A-Z]+-\d+|\d+)", param_text, re.IGNORECASE)
+
+        if message_ref_match:
+            message_ref = message_ref_match.group(1).strip()
+
+        if jira_match:
+            jira_key = jira_match.group(1).strip().upper()
+            # If only digits, prepend default project key
+            if jira_key.isdigit():
+                jira_key = f"{Config.JIRA_PROJECT_KEY}-{jira_key}"
+
+        # Validate parameters
+        if not message_ref or not jira_key:
+            await update.message.reply_text(
+                "❌ Both message_ref and jira parameters are required.\n\n"
+                "Usage: `/link message_ref: <uuid> jira: <issue-key>`\n"
+                "Examples:\n"
+                "  • `/link message_ref: 550e8400-e29b-41d4-a716-446655440000 jira: AAI-1020`\n"
+                "  • `/link message_ref: 123e4567-e89b-12d3-a456-426614174000 jira: 4403`"
+            )
+            return
+
+        # Validate UUID format
+        uuid_pattern = re.compile(
+            r"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$"
+        )
+        if not uuid_pattern.match(message_ref):
+            await update.message.reply_text(
+                f"❌ Invalid UUID format for message_ref: {message_ref}\n\n"
+                "Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            )
+            return
+
+        # Insert into database
+        try:
+            success = self.database_service.insert_jira_issue_link(message_ref, jira_key)
+
+            if success:
+                await update.message.reply_text(
+                    f"✅ Successfully linked:\n"
+                    f"• Message Ref: `{message_ref}`\n"
+                    f"• Jira Issue: {jira_key}\n\n"
+                    f"🔗 {self.jira_service.get_issue_url(jira_key)}",
+                    parse_mode="Markdown",
+                )
+                logger.info(
+                    f"User {user.username} linked message_ref {message_ref} to Jira issue {jira_key}"
+                )
+            else:
+                await update.message.reply_text(
+                    f"❌ Failed to store the link. This might be a database error or duplicate entry."
+                )
+                logger.error(
+                    f"Failed to insert link: message_ref={message_ref}, jira_key={jira_key}"
+                )
+
+        except Exception as e:
+            await update.message.reply_text(
+                f"❌ An error occurred while storing the link: {str(e)}"
+            )
+            logger.error(f"Error in link_command: {e}", exc_info=True)
 
     async def desc_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /desc command to fetch and display Jira issue details."""
@@ -1181,6 +1289,7 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("task", self.task_command))
         self.application.add_handler(CommandHandler("bug", self.bug_command))
         self.application.add_handler(CommandHandler("story", self.story_command))
+        self.application.add_handler(CommandHandler("link", self.link_command))
         self.application.add_handler(CommandHandler("desc", self.desc_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("userinfo", self.userinfo_command))

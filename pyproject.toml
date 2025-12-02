@@ -10,7 +10,8 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "nest-asyncio>=1.5.0",
     "transliterate>=1.10.2",
-    "fuzzywuzzy>=0.18.0"
+    "fuzzywuzzy>=0.18.0",
+    "psycopg2-binary>=2.9.0"
 ]
 
 [build-system]

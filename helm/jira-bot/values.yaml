@@ -87,6 +87,12 @@ config:
     projectKey: "PROJ"
     componentName: "default"
   
+  # Database configuration
+  database:
+    host: "localhost"
+    port: "5432"
+    name: "jira_bot"
+  
   # User authorization
   allowedUsers: ""
   
@@ -110,6 +116,8 @@ secrets:
   telegramBotTokenKey: "telegram-bot-token"
   jiraUsernameKey: "jira-username"
   jiraApiTokenKey: "jira-api-token"
+  dbUserKey: "db-user"
+  dbPasswordKey: "db-password"
 
 # Environment variables (will be set from secrets or values)
 env:
@@ -117,3 +125,5 @@ env:
   telegramBotToken: ""
   jiraUsername: ""
   jiraApiToken: ""
+  dbUser: ""
+  dbPassword: ""
