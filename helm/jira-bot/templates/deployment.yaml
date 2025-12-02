@@ -52,16 +52,16 @@ spec:
                 secretKeyRef:
                   name: {{ include "jira-bot.fullname" . }}-secrets
                   key: {{ .Values.secrets.jiraApiTokenKey }}
-            - name: DB_USER
+            - name: CH_USER
               valueFrom:
                 secretKeyRef:
                   name: {{ include "jira-bot.fullname" . }}-secrets
-                  key: {{ .Values.secrets.dbUserKey }}
-            - name: DB_PASSWORD
+                  key: {{ .Values.secrets.chUserKey }}
+            - name: CH_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "jira-bot.fullname" . }}-secrets
-                  key: {{ .Values.secrets.dbPasswordKey }}
+                  key: {{ .Values.secrets.chPasswordKey }}
             {{- else if .Values.secrets.existingSecret }}
             - name: TELEGRAM_BOT_TOKEN
               valueFrom:
@@ -78,16 +78,16 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.existingSecret }}
                   key: {{ .Values.secrets.jiraApiTokenKey }}
-            - name: DB_USER
+            - name: CH_USER
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.existingSecret }}
-                  key: {{ .Values.secrets.dbUserKey }}
-            - name: DB_PASSWORD
+                  key: {{ .Values.secrets.chUserKey }}
+            - name: CH_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.existingSecret }}
-                  key: {{ .Values.secrets.dbPasswordKey }}
+                  key: {{ .Values.secrets.chPasswordKey }}
             {{- else }}
             - name: TELEGRAM_BOT_TOKEN
               value: {{ .Values.env.telegramBotToken | quote }}
@@ -95,10 +95,10 @@ spec:
               value: {{ .Values.env.jiraUsername | quote }}
             - name: JIRA_API_TOKEN
               value: {{ .Values.env.jiraApiToken | quote }}
-            - name: DB_USER
-              value: {{ .Values.env.dbUser | quote }}
-            - name: DB_PASSWORD
-              value: {{ .Values.env.dbPassword | quote }}
+            - name: CH_USER
+              value: {{ .Values.env.chUser | quote }}
+            - name: CH_PASSWORD
+              value: {{ .Values.env.chPassword | quote }}
             {{- end }}
             - name: JIRA_URL
               value: {{ .Values.config.jira.url | quote }}
@@ -106,12 +106,12 @@ spec:
               value: {{ .Values.config.jira.projectKey | quote }}
             - name: JIRA_COMPONENT_NAME
               value: {{ .Values.config.jira.componentName | quote }}
-            - name: DB_HOST
-              value: {{ .Values.config.database.host | quote }}
-            - name: DB_PORT
-              value: {{ .Values.config.database.port | quote }}
-            - name: DB_NAME
-              value: {{ .Values.config.database.name | quote }}
+            - name: CH_HOST
+              value: {{ .Values.config.clickhouse.host | quote }}
+            - name: CH_PORT
+              value: {{ .Values.config.clickhouse.port | quote }}
+            - name: CH_DATABASE
+              value: {{ .Values.config.clickhouse.database | quote }}
             - name: ALLOWED_USERS
               value: {{ .Values.config.allowedUsers | quote }}
           {{- if .Values.config.healthCheck.enabled }}

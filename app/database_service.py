@@ -1,40 +1,46 @@
-"""Database service for PostgreSQL operations."""
+"""Database service for ClickHouse operations."""
+
 import logging
-import psycopg2
-from psycopg2 import sql, extras
 from typing import Optional
+
+from clickhouse_driver import Client
+
 from app.config import Config
 
 logger = logging.getLogger(__name__)
 
 
 class DatabaseService:
-    """Service for database operations."""
+    """Service for ClickHouse database operations."""
 
     def __init__(self):
         """Initialize database service."""
-        self.connection = None
+        self.client = None
         self._connect()
 
     def _connect(self):
-        """Establish database connection."""
+        """Establish ClickHouse connection."""
         try:
-            self.connection = psycopg2.connect(
-                host=Config.DB_HOST,
-                port=Config.DB_PORT,
-                database=Config.DB_NAME,
-                user=Config.DB_USER,
-                password=Config.DB_PASSWORD
+            self.client = Client(
+                host=Config.CH_HOST,
+                port=int(Config.CH_PORT),
+                user=Config.CH_USER,
+                password=Config.CH_PASSWORD,
+                database=Config.CH_DATABASE,
             )
-            logger.info("Successfully connected to PostgreSQL database")
+            # Test connection
+            self.client.execute("SELECT 1")
+            logger.info("Successfully connected to ClickHouse database")
         except Exception as e:
-            logger.error(f"Failed to connect to database: {e}")
+            logger.error(f"Failed to connect to ClickHouse: {e}")
             raise
 
     def _ensure_connection(self):
-        """Ensure database connection is active."""
-        if self.connection is None or self.connection.closed:
-            logger.info("Reconnecting to database...")
+        """Ensure ClickHouse connection is active."""
+        try:
+            self.client.execute("SELECT 1")
+        except Exception:
+            logger.info("Reconnecting to ClickHouse...")
             self._connect()
 
     def insert_jira_issue_link(self, message_ref: str, jira_key: str) -> bool:
@@ -51,24 +57,22 @@ class DatabaseService:
         try:
             self._ensure_connection()
 
-            with self.connection.cursor() as cursor:
-                query = sql.SQL(
-                    "INSERT INTO jira_issues (message_ref, jira_key) VALUES (%s, %s)"
-                )
-                cursor.execute(query, (message_ref, jira_key))
-                self.connection.commit()
+            query = """
+                INSERT INTO jira_issues (message_ref, jira_key, created_at)
+                VALUES (%(message_ref)s, %(jira_key)s, now())
+            """
 
-            logger.info(f"Successfully inserted link: message_ref={message_ref}, jira_key={jira_key}")
+            self.client.execute(
+                query, {"message_ref": message_ref, "jira_key": jira_key}
+            )
+
+            logger.info(
+                f"Successfully inserted link: message_ref={message_ref}, jira_key={jira_key}"
+            )
             return True
 
-        except psycopg2.IntegrityError as e:
-            logger.error(f"Integrity error inserting jira_issue link: {e}")
-            self.connection.rollback()
-            return False
         except Exception as e:
             logger.error(f"Error inserting jira_issue link: {e}")
-            if self.connection:
-                self.connection.rollback()
             return False
 
     def get_jira_keys_by_message_ref(self, message_ref: str) -> list[str]:
@@ -84,10 +88,10 @@ class DatabaseService:
         try:
             self._ensure_connection()
 
-            with self.connection.cursor() as cursor:
-                query = sql.SQL("SELECT jira_key FROM jira_issues WHERE message_ref = %s")
-                cursor.execute(query, (message_ref,))
-                results = cursor.fetchall()
+            query = (
+                "SELECT jira_key FROM jira_issues WHERE message_ref = %(message_ref)s"
+            )
+            results = self.client.execute(query, {"message_ref": message_ref})
 
             return [row[0] for row in results]
 
@@ -96,12 +100,11 @@ class DatabaseService:
             return []
 
     def close(self):
-        """Close database connection."""
-        if self.connection and not self.connection.closed:
-            self.connection.close()
-            logger.info("Database connection closed")
+        """Close ClickHouse connection."""
+        if self.client:
+            self.client.disconnect()
+            logger.info("ClickHouse connection closed")
 
     def __del__(self):
-        """Cleanup database connection."""
+        """Cleanup ClickHouse connection."""
         self.close()
-

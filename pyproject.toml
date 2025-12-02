@@ -11,7 +11,7 @@ dependencies = [
     "nest-asyncio>=1.5.0",
     "transliterate>=1.10.2",
     "fuzzywuzzy>=0.18.0",
-    "psycopg2-binary>=2.9.0"
+    "clickhouse-driver>=0.2.0"
 ]
 
 [build-system]

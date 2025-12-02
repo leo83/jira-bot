@@ -87,11 +87,11 @@ config:
     projectKey: "PROJ"
     componentName: "default"
   
-  # Database configuration
-  database:
+  # ClickHouse configuration
+  clickhouse:
     host: "localhost"
-    port: "5432"
-    name: "jira_bot"
+    port: "9000"
+    database: "default"
   
   # User authorization
   allowedUsers: ""
@@ -116,8 +116,8 @@ secrets:
   telegramBotTokenKey: "telegram-bot-token"
   jiraUsernameKey: "jira-username"
   jiraApiTokenKey: "jira-api-token"
-  dbUserKey: "db-user"
-  dbPasswordKey: "db-password"
+  chUserKey: "ch-user"
+  chPasswordKey: "ch-password"
 
 # Environment variables (will be set from secrets or values)
 env:
@@ -125,5 +125,5 @@ env:
   telegramBotToken: ""
   jiraUsername: ""
   jiraApiToken: ""
-  dbUser: ""
-  dbPassword: ""
+  chUser: ""
+  chPassword: ""

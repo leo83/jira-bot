@@ -1,11 +1,10 @@
 # Multi-stage build for production optimization
 FROM python:3.12-slim AS builder
 
-# Install system dependencies for building (including PostgreSQL libraries)
+# Install system dependencies for building
 RUN apt-get update && apt-get install -y \
     curl \
     build-essential \
-    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv
@@ -27,11 +26,6 @@ RUN uv sync
 
 # Production stage
 FROM python:3.12-slim AS production
-
-# Install runtime dependencies for PostgreSQL
-RUN apt-get update && apt-get install -y \
-    libpq5 \
-    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app

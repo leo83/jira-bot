@@ -20,17 +20,23 @@ class Config:
     JIRA_PROJECT_KEY = os.getenv("JIRA_PROJECT_KEY", "PROJ")
     JIRA_COMPONENT_NAME = os.getenv("JIRA_COMPONENT_NAME", "default")
 
-    # Database Configuration
-    DB_HOST = os.getenv("DB_HOST", "localhost")
-    DB_PORT = os.getenv("DB_PORT", "5432")
-    DB_NAME = os.getenv("DB_NAME", "jira_bot")
-    DB_USER = os.getenv("DB_USER")
-    DB_PASSWORD = os.getenv("DB_PASSWORD")
+    # ClickHouse Configuration
+    CH_HOST = os.getenv("CH_HOST", "localhost")
+    CH_PORT = os.getenv("CH_PORT", "9000")
+    CH_DATABASE = os.getenv("CH_DATABASE", "default")
+    CH_USER = os.getenv("CH_USER")
+    CH_PASSWORD = os.getenv("CH_PASSWORD")
 
     @classmethod
     def validate(cls):
         """Validate that all required configuration is present."""
-        required_vars = ["TELEGRAM_BOT_TOKEN", "JIRA_USERNAME", "JIRA_API_TOKEN", "DB_USER", "DB_PASSWORD"]
+        required_vars = [
+            "TELEGRAM_BOT_TOKEN",
+            "JIRA_USERNAME",
+            "JIRA_API_TOKEN",
+            "CH_USER",
+            "CH_PASSWORD",
+        ]
 
         missing_vars = []
         for var in required_vars:
