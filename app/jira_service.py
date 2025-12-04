@@ -338,3 +338,30 @@ class JiraService:
     def get_issue_url(self, issue_key: str) -> str:
         """Get the full URL for a Jira issue."""
         return f"{Config.JIRA_URL}/browse/{issue_key}"
+
+    def add_comment(self, issue_key: str, comment: str) -> bool:
+        """
+        Add a comment to a Jira issue.
+
+        Args:
+            issue_key (str): The issue key (e.g., 'PROJ-123')
+            comment (str): The comment text to add
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # If only digits provided, prepend default project key
+            if issue_key.isdigit():
+                issue_key = f"{self.project_key}-{issue_key}"
+
+            self.jira.add_comment(issue_key, comment)
+            logger.info(f"Added comment to issue {issue_key}")
+            return True
+
+        except JIRAError as e:
+            logger.error(f"Failed to add comment to issue {issue_key}: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error adding comment to {issue_key}: {e}")
+            return False

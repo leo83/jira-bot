@@ -7,3 +7,5 @@ CREATE TABLE jira_issues(
 ) ENGINE = MergeTree()
 ORDER BY (message_ref)
 ;
+
+OPTIMIZE TABLE jira_issues FINAL DEDUPLICATE BY message_ref, jira_key;

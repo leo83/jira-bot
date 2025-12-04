@@ -27,6 +27,12 @@ class Config:
     CH_USER = os.getenv("CH_USER")
     CH_PASSWORD = os.getenv("CH_PASSWORD")
 
+    # Grafana Configuration (for message reference links)
+    GRAFANA_MESSAGE_URL = os.getenv(
+        "GRAFANA_MESSAGE_URL",
+        "http://grafana-ai.aeroclub.int/d/fenfa2ht8b668a/message-events-details?var-message_ref=",
+    )
+
     @classmethod
     def validate(cls):
         """Validate that all required configuration is present."""

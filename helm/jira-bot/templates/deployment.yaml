@@ -112,6 +112,8 @@ spec:
               value: {{ .Values.config.clickhouse.port | quote }}
             - name: CH_DATABASE
               value: {{ .Values.config.clickhouse.database | quote }}
+            - name: GRAFANA_MESSAGE_URL
+              value: {{ .Values.config.grafanaMessageUrl | quote }}
             - name: ALLOWED_USERS
               value: {{ .Values.config.allowedUsers | quote }}
           {{- if .Values.config.healthCheck.enabled }}

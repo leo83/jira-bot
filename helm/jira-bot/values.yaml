@@ -93,6 +93,9 @@ config:
     port: "9000"
     database: "default"
   
+  # Grafana configuration (for message reference links)
+  grafanaMessageUrl: "http://grafana-ai.aeroclub.int/d/fenfa2ht8b668a/message-events-details?var-message_ref="
+  
   # User authorization
   allowedUsers: ""
   

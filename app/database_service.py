@@ -43,7 +43,37 @@ class DatabaseService:
             logger.info("Reconnecting to ClickHouse...")
             self._connect()
 
-    def insert_jira_issue_link(self, message_ref: str, jira_key: str) -> bool:
+    def link_exists(self, message_ref: str, jira_key: str) -> bool:
+        """
+        Check if a link between message_ref and jira_key already exists.
+
+        Args:
+            message_ref: UUID of the message reference
+            jira_key: Jira issue key (e.g., AAI-1020)
+
+        Returns:
+            bool: True if link exists, False otherwise
+        """
+        try:
+            self._ensure_connection()
+
+            query = """
+                SELECT count() FROM jira_issues
+                WHERE message_ref = %(message_ref)s AND jira_key = %(jira_key)s
+            """
+            result = self.client.execute(
+                query, {"message_ref": message_ref, "jira_key": jira_key}
+            )
+
+            return result[0][0] > 0
+
+        except Exception as e:
+            logger.error(f"Error checking link existence: {e}")
+            return False
+
+    def insert_jira_issue_link(
+        self, message_ref: str, jira_key: str
+    ) -> tuple[bool, str]:
         """
         Insert a link between a message reference and a Jira issue.
 
@@ -52,10 +82,18 @@ class DatabaseService:
             jira_key: Jira issue key (e.g., AAI-1020)
 
         Returns:
-            bool: True if successful, False otherwise
+            tuple[bool, str]: (success, error_message) - success is True if inserted,
+                             error_message contains reason if failed
         """
         try:
             self._ensure_connection()
+
+            # Check for duplicate
+            if self.link_exists(message_ref, jira_key):
+                logger.warning(
+                    f"Duplicate link rejected: message_ref={message_ref}, jira_key={jira_key}"
+                )
+                return False, "duplicate"
 
             query = """
                 INSERT INTO jira_issues (message_ref, jira_key, created_at)
@@ -69,11 +107,11 @@ class DatabaseService:
             logger.info(
                 f"Successfully inserted link: message_ref={message_ref}, jira_key={jira_key}"
             )
-            return True
+            return True, ""
 
         except Exception as e:
             logger.error(f"Error inserting jira_issue link: {e}")
-            return False
+            return False, "error"
 
     def get_jira_keys_by_message_ref(self, message_ref: str) -> list[str]:
         """

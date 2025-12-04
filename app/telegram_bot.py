@@ -775,24 +775,50 @@ class TelegramBot:
             )
             return
 
-        # Insert into database
+        # Insert into database and add comment to Jira
         try:
-            success = self.database_service.insert_jira_issue_link(message_ref, jira_key)
+            success, error_reason = self.database_service.insert_jira_issue_link(
+                message_ref, jira_key
+            )
 
             if success:
-                await update.message.reply_text(
-                    f"✅ Successfully linked:\n"
-                    f"• Message Ref: `{message_ref}`\n"
-                    f"• Jira Issue: {jira_key}\n\n"
-                    f"🔗 {self.jira_service.get_issue_url(jira_key)}",
-                    parse_mode="Markdown",
-                )
+                # Add comment to Jira issue with link to message reference
+                grafana_url = f"{Config.GRAFANA_MESSAGE_URL}{message_ref}"
+                comment = f"Message reference linked: {grafana_url}"
+                comment_added = self.jira_service.add_comment(jira_key, comment)
+
+                if comment_added:
+                    await update.message.reply_text(
+                        f"✅ Successfully linked:\n"
+                        f"• Message Ref: {message_ref}\n"
+                        f"• Jira Issue: {jira_key}\n\n"
+                        f"📊 Grafana: {grafana_url}\n"
+                        f"🔗 Jira: {self.jira_service.get_issue_url(jira_key)}",
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"⚠️ Link stored but failed to add comment to Jira:\n"
+                        f"• Message Ref: {message_ref}\n"
+                        f"• Jira Issue: {jira_key}\n\n"
+                        f"📊 Grafana: {grafana_url}\n"
+                        f"🔗 Jira: {self.jira_service.get_issue_url(jira_key)}",
+                    )
+
                 logger.info(
                     f"User {user.username} linked message_ref {message_ref} to Jira issue {jira_key}"
                 )
+            elif error_reason == "duplicate":
+                await update.message.reply_text(
+                    f"⚠️ This link already exists:\n"
+                    f"• Message Ref: {message_ref}\n"
+                    f"• Jira Issue: {jira_key}"
+                )
+                logger.warning(
+                    f"Duplicate link attempt by {user.username}: message_ref={message_ref}, jira_key={jira_key}"
+                )
             else:
                 await update.message.reply_text(
-                    f"❌ Failed to store the link. This might be a database error or duplicate entry."
+                    f"❌ Failed to store the link. Database error occurred."
                 )
                 logger.error(
                     f"Failed to insert link: message_ref={message_ref}, jira_key={jira_key}"
