@@ -113,6 +113,48 @@ class DatabaseService:
             logger.error(f"Error inserting jira_issue link: {e}")
             return False, "error"
 
+    def delete_jira_issue_link(
+        self, message_ref: str, jira_key: str
+    ) -> tuple[bool, str]:
+        """
+        Delete a link between a message reference and a Jira issue.
+
+        Args:
+            message_ref: UUID of the message reference
+            jira_key: Jira issue key (e.g., AAI-1020)
+
+        Returns:
+            tuple[bool, str]: (success, error_message) - success is True if deleted,
+                             error_message contains reason if failed
+        """
+        try:
+            self._ensure_connection()
+
+            # Check if link exists
+            if not self.link_exists(message_ref, jira_key):
+                logger.warning(
+                    f"Link not found for deletion: message_ref={message_ref}, jira_key={jira_key}"
+                )
+                return False, "not_found"
+
+            query = """
+                ALTER TABLE jira_issues DELETE
+                WHERE message_ref = %(message_ref)s AND jira_key = %(jira_key)s
+            """
+
+            self.client.execute(
+                query, {"message_ref": message_ref, "jira_key": jira_key}
+            )
+
+            logger.info(
+                f"Successfully deleted link: message_ref={message_ref}, jira_key={jira_key}"
+            )
+            return True, ""
+
+        except Exception as e:
+            logger.error(f"Error deleting jira_issue link: {e}")
+            return False, "error"
+
     def get_jira_keys_by_message_ref(self, message_ref: str) -> list[str]:
         """
         Get all Jira keys linked to a message reference.

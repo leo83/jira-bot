@@ -559,6 +559,7 @@ class TelegramBot:
 /task desc: <description> - Use description after "desc:" as task description
 /desc <issue-key> - Get details of a Jira issue (e.g., /desc 123 or /desc PROJ-123)
 /link message_ref: <uuid> jira: <key> - Store message reference and Jira issue link
+/unlink message_ref: <uuid> jira: <key> - Remove message reference and Jira issue link
 /help - Show this help message
 /start - Start the bot
 /userinfo - Show your user information
@@ -571,6 +572,7 @@ class TelegramBot:
 /desc 123
 /desc PROJ-456
 /link message_ref: 550e8400-e29b-41d4-a716-446655440000 jira: AAI-1020
+/unlink message_ref: 550e8400-e29b-41d4-a716-446655440000 jira: AAI-1020
 /task Fix critical bug type: Bug
 /bug Login issue component: авиа-параметры sprint: active
 /story desc: Implement user authentication system
@@ -829,6 +831,120 @@ class TelegramBot:
                 f"❌ An error occurred while storing the link: {str(e)}"
             )
             logger.error(f"Error in link_command: {e}", exc_info=True)
+
+    async def unlink_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle the /unlink command to remove message reference and Jira key link from database."""
+        if not update.message:
+            return
+
+        user = update.effective_user
+
+        # Check user permissions
+        if not UserConfig.is_user_allowed(user.username, user.id):
+            await update.message.reply_text(
+                "❌ Access denied. You are not authorized to use this command."
+            )
+            logger.warning(
+                f"Unauthorized access attempt by user: {user.username} (ID: {user.id})"
+            )
+            return
+
+        # Parse command arguments
+        message_text = update.message.text or ""
+        parts = message_text.split(maxsplit=1)
+
+        if len(parts) < 2:
+            await update.message.reply_text(
+                "❌ Please provide parameters.\n\n"
+                "Usage: `/unlink message_ref: <uuid> jira: <issue-key>`\n"
+                "Examples:\n"
+                "  • `/unlink message_ref: 550e8400-e29b-41d4-a716-446655440000 jira: AAI-1020`\n"
+                "  • `/unlink message_ref: 123e4567-e89b-12d3-a456-426614174000 jira: SV-4403`"
+            )
+            return
+
+        # Extract parameters using regex
+        import re
+
+        param_text = parts[1]
+        message_ref = None
+        jira_key = None
+
+        # Pattern to extract message_ref and jira parameters
+        message_ref_match = re.search(
+            r"message_ref:\s*([a-fA-F0-9\-]+)", param_text, re.IGNORECASE
+        )
+        jira_match = re.search(r"jira:\s*([A-Z]+-\d+|\d+)", param_text, re.IGNORECASE)
+
+        if message_ref_match:
+            message_ref = message_ref_match.group(1).strip()
+
+        if jira_match:
+            jira_key = jira_match.group(1).strip().upper()
+            # If only digits, prepend default project key
+            if jira_key.isdigit():
+                jira_key = f"{Config.JIRA_PROJECT_KEY}-{jira_key}"
+
+        # Validate parameters
+        if not message_ref or not jira_key:
+            await update.message.reply_text(
+                "❌ Both message_ref and jira parameters are required.\n\n"
+                "Usage: `/unlink message_ref: <uuid> jira: <issue-key>`\n"
+                "Examples:\n"
+                "  • `/unlink message_ref: 550e8400-e29b-41d4-a716-446655440000 jira: AAI-1020`\n"
+                "  • `/unlink message_ref: 123e4567-e89b-12d3-a456-426614174000 jira: 4403`"
+            )
+            return
+
+        # Validate UUID format
+        uuid_pattern = re.compile(
+            r"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$"
+        )
+        if not uuid_pattern.match(message_ref):
+            await update.message.reply_text(
+                f"❌ Invalid UUID format for message_ref: {message_ref}\n\n"
+                "Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            )
+            return
+
+        # Delete from database
+        try:
+            success, error_reason = self.database_service.delete_jira_issue_link(
+                message_ref, jira_key
+            )
+
+            if success:
+                await update.message.reply_text(
+                    f"✅ Successfully unlinked:\n"
+                    f"• Message Ref: {message_ref}\n"
+                    f"• Jira Issue: {jira_key}"
+                )
+                logger.info(
+                    f"User {user.username} unlinked message_ref {message_ref} from Jira issue {jira_key}"
+                )
+            elif error_reason == "not_found":
+                await update.message.reply_text(
+                    f"⚠️ Link not found:\n"
+                    f"• Message Ref: {message_ref}\n"
+                    f"• Jira Issue: {jira_key}\n\n"
+                    "This link does not exist in the database."
+                )
+                logger.warning(
+                    f"Unlink attempt for non-existent link by {user.username}: message_ref={message_ref}, jira_key={jira_key}"
+                )
+            else:
+                await update.message.reply_text(
+                    f"❌ Failed to remove the link. Database error occurred."
+                )
+                logger.error(
+                    f"Failed to delete link: message_ref={message_ref}, jira_key={jira_key}"
+                )
+
+        except Exception as e:
+            await update.message.reply_text(
+                f"❌ An error occurred while removing the link: {str(e)}"
+            )
+            logger.error(f"Error in unlink_command: {e}", exc_info=True)
 
     async def desc_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /desc command to fetch and display Jira issue details."""
@@ -1316,6 +1432,7 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("bug", self.bug_command))
         self.application.add_handler(CommandHandler("story", self.story_command))
         self.application.add_handler(CommandHandler("link", self.link_command))
+        self.application.add_handler(CommandHandler("unlink", self.unlink_command))
         self.application.add_handler(CommandHandler("desc", self.desc_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("userinfo", self.userinfo_command))
