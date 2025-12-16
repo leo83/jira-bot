@@ -33,15 +33,18 @@ class Config:
         "http://grafana-ai.aeroclub.int/d/fenfa2ht8b668a/message-events-details?var-message_ref=",
     )
 
+    # Token Encryption Configuration
+    # Key must be 32 url-safe base64-encoded bytes (use Fernet.generate_key() to create one)
+    TOKEN_ENCRYPTION_KEY = os.getenv("TOKEN_ENCRYPTION_KEY")
+
     @classmethod
     def validate(cls):
         """Validate that all required configuration is present."""
         required_vars = [
             "TELEGRAM_BOT_TOKEN",
-            "JIRA_USERNAME",
-            "JIRA_API_TOKEN",
             "CH_USER",
             "CH_PASSWORD",
+            "TOKEN_ENCRYPTION_KEY",
         ]
 
         missing_vars = []

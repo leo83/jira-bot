@@ -99,6 +99,10 @@ config:
   # User authorization
   allowedUsers: ""
   
+  # Token encryption key (32 url-safe base64-encoded bytes)
+  # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+  tokenEncryptionKey: ""
+  
   # Health check configuration
   healthCheck:
     enabled: true
@@ -117,16 +121,14 @@ secrets:
   existingSecret: ""
   # Secret data keys
   telegramBotTokenKey: "telegram-bot-token"
-  jiraUsernameKey: "jira-username"
-  jiraApiTokenKey: "jira-api-token"
   chUserKey: "ch-user"
   chPasswordKey: "ch-password"
+  tokenEncryptionKeyKey: "token-encryption-key"
 
 # Environment variables (will be set from secrets or values)
 env:
   # These will be overridden by secret values if secrets.create is true
   telegramBotToken: ""
-  jiraUsername: ""
-  jiraApiToken: ""
   chUser: ""
   chPassword: ""
+  tokenEncryptionKey: ""

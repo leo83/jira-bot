@@ -179,6 +179,120 @@ class DatabaseService:
             logger.error(f"Error fetching jira keys: {e}")
             return []
 
+    # ==================== User Token Methods ====================
+
+    def save_user_token(
+        self, telegram_id: int, encrypted_token: str, username: Optional[str] = None
+    ) -> tuple[bool, str]:
+        """
+        Save or update an encrypted Jira token for a Telegram user.
+
+        Args:
+            telegram_id: Telegram user ID
+            encrypted_token: Fernet-encrypted Jira API token
+            username: Optional Telegram username
+
+        Returns:
+            tuple[bool, str]: (success, error_message)
+        """
+        try:
+            self._ensure_connection()
+
+            # Insert new token (ReplacingMergeTree will handle updates)
+            query = """
+                INSERT INTO user_tokens (telegram_id, jira_token_encrypted, telegram_username, created_at, updated_at)
+                VALUES (%(telegram_id)s, %(token)s, %(username)s, now(), now())
+            """
+
+            self.client.execute(
+                query,
+                {
+                    "telegram_id": telegram_id,
+                    "token": encrypted_token,
+                    "username": username,
+                },
+            )
+
+            logger.info(f"Successfully saved token for telegram_id={telegram_id}")
+            return True, ""
+
+        except Exception as e:
+            logger.error(f"Error saving user token: {e}")
+            return False, "error"
+
+    def get_user_token(self, telegram_id: int) -> Optional[str]:
+        """
+        Get the encrypted Jira token for a Telegram user.
+
+        Args:
+            telegram_id: Telegram user ID
+
+        Returns:
+            The encrypted token string, or None if not found
+        """
+        try:
+            self._ensure_connection()
+
+            # Use FINAL to get the latest version from ReplacingMergeTree
+            query = """
+                SELECT jira_token_encrypted FROM user_tokens FINAL
+                WHERE telegram_id = %(telegram_id)s
+            """
+            result = self.client.execute(query, {"telegram_id": telegram_id})
+
+            if result:
+                return result[0][0]
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting user token: {e}")
+            return None
+
+    def delete_user_token(self, telegram_id: int) -> tuple[bool, str]:
+        """
+        Delete the Jira token for a Telegram user.
+
+        Args:
+            telegram_id: Telegram user ID
+
+        Returns:
+            tuple[bool, str]: (success, error_message)
+        """
+        try:
+            self._ensure_connection()
+
+            # Check if token exists
+            existing = self.get_user_token(telegram_id)
+            if not existing:
+                logger.warning(f"Token not found for deletion: telegram_id={telegram_id}")
+                return False, "not_found"
+
+            query = """
+                ALTER TABLE user_tokens DELETE
+                WHERE telegram_id = %(telegram_id)s
+            """
+
+            self.client.execute(query, {"telegram_id": telegram_id})
+
+            logger.info(f"Successfully deleted token for telegram_id={telegram_id}")
+            return True, ""
+
+        except Exception as e:
+            logger.error(f"Error deleting user token: {e}")
+            return False, "error"
+
+    def user_is_registered(self, telegram_id: int) -> bool:
+        """
+        Check if a user has a registered Jira token.
+
+        Args:
+            telegram_id: Telegram user ID
+
+        Returns:
+            bool: True if user has a token, False otherwise
+        """
+        return self.get_user_token(telegram_id) is not None
+
     def close(self):
         """Close ClickHouse connection."""
         if self.client:

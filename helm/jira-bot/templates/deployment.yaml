@@ -42,16 +42,6 @@ spec:
                 secretKeyRef:
                   name: {{ include "jira-bot.fullname" . }}-secrets
                   key: {{ .Values.secrets.telegramBotTokenKey }}
-            - name: JIRA_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "jira-bot.fullname" . }}-secrets
-                  key: {{ .Values.secrets.jiraUsernameKey }}
-            - name: JIRA_API_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "jira-bot.fullname" . }}-secrets
-                  key: {{ .Values.secrets.jiraApiTokenKey }}
             - name: CH_USER
               valueFrom:
                 secretKeyRef:
@@ -62,22 +52,17 @@ spec:
                 secretKeyRef:
                   name: {{ include "jira-bot.fullname" . }}-secrets
                   key: {{ .Values.secrets.chPasswordKey }}
+            - name: TOKEN_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "jira-bot.fullname" . }}-secrets
+                  key: {{ .Values.secrets.tokenEncryptionKeyKey }}
             {{- else if .Values.secrets.existingSecret }}
             - name: TELEGRAM_BOT_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.existingSecret }}
                   key: {{ .Values.secrets.telegramBotTokenKey }}
-            - name: JIRA_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.existingSecret }}
-                  key: {{ .Values.secrets.jiraUsernameKey }}
-            - name: JIRA_API_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.existingSecret }}
-                  key: {{ .Values.secrets.jiraApiTokenKey }}
             - name: CH_USER
               valueFrom:
                 secretKeyRef:
@@ -88,17 +73,20 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.existingSecret }}
                   key: {{ .Values.secrets.chPasswordKey }}
+            - name: TOKEN_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingSecret }}
+                  key: {{ .Values.secrets.tokenEncryptionKeyKey }}
             {{- else }}
             - name: TELEGRAM_BOT_TOKEN
               value: {{ .Values.env.telegramBotToken | quote }}
-            - name: JIRA_USERNAME
-              value: {{ .Values.env.jiraUsername | quote }}
-            - name: JIRA_API_TOKEN
-              value: {{ .Values.env.jiraApiToken | quote }}
             - name: CH_USER
               value: {{ .Values.env.chUser | quote }}
             - name: CH_PASSWORD
               value: {{ .Values.env.chPassword | quote }}
+            - name: TOKEN_ENCRYPTION_KEY
+              value: {{ .Values.env.tokenEncryptionKey | quote }}
             {{- end }}
             - name: JIRA_URL
               value: {{ .Values.config.jira.url | quote }}

@@ -13,18 +13,37 @@ logger = logging.getLogger(__name__)
 class JiraService:
     """Service class for Jira operations."""
 
-    def __init__(self):
-        """Initialize Jira service with configuration."""
+    def __init__(self, api_token: Optional[str] = None):
+        """
+        Initialize Jira service with configuration.
+
+        Args:
+            api_token: Optional personal API token. If not provided, uses Config.JIRA_API_TOKEN.
+        """
         self.jira = None
         self.project_key = Config.JIRA_PROJECT_KEY
+        self._api_token = api_token or Config.JIRA_API_TOKEN
         self._connect()
+
+    @classmethod
+    def with_token(cls, api_token: str) -> "JiraService":
+        """
+        Factory method to create a JiraService instance with a specific API token.
+
+        Args:
+            api_token: The Jira API token to use for authentication
+
+        Returns:
+            A new JiraService instance configured with the provided token
+        """
+        return cls(api_token=api_token)
 
     def _connect(self):
         """Establish connection to Jira using Bearer token authentication."""
         try:
             # Create custom headers for Bearer token authentication
             headers = {
-                "Authorization": f"Bearer {Config.JIRA_API_TOKEN}",
+                "Authorization": f"Bearer {self._api_token}",
                 "Accept": "application/json",
                 "Content-Type": "application/json",
             }
@@ -313,7 +332,7 @@ class JiraService:
 
             # Create custom headers for Bearer token authentication
             headers = {
-                "Authorization": f"Bearer {Config.JIRA_API_TOKEN}",
+                "Authorization": f"Bearer {self._api_token}",
             }
 
             # Download the attachment

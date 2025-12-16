@@ -13,6 +13,7 @@ from telegram.ext import (
 
 from .component_service import ComponentService
 from .config import Config
+from .crypto_service import CryptoService
 from .database_service import DatabaseService
 from .issue_type_service import IssueTypeService
 from .jira_service import JiraService
@@ -25,13 +26,52 @@ logger = logging.getLogger(__name__)
 class TelegramBot:
     """Telegram bot for creating Jira stories."""
 
+    # Error message for unregistered users
+    REGISTRATION_REQUIRED_MSG = (
+        "❌ Вы не зарегистрированы.\n\n"
+        "Пожалуйста, перейдите в приватный чат с @aeroclub_jira_bot "
+        "и вызовите команду /register для регистрации вашего Jira токена."
+    )
+
     def __init__(self):
         """Initialize the Telegram bot."""
-        self.jira_service = JiraService()
-        self.component_service = ComponentService(self.jira_service)
-        self.sprint_service = SprintService(self.jira_service.jira)
         self.database_service = DatabaseService()
+        self.crypto_service = CryptoService()
+        # Note: jira_service is now created per-user with their personal token
+        # We keep a default one for backward compatibility (if needed)
+        self.jira_service = None  # Will be initialized lazily if needed
+        self.component_service = None
+        self.sprint_service = None
         self.application = None
+
+    def _get_user_jira_service(self, telegram_id: int) -> JiraService | None:
+        """
+        Get a JiraService instance for a specific user using their personal token.
+
+        Args:
+            telegram_id: Telegram user ID
+
+        Returns:
+            JiraService instance with user's token, or None if user not registered
+        """
+        encrypted_token = self.database_service.get_user_token(telegram_id)
+        if not encrypted_token:
+            return None
+
+        decrypted_token = self.crypto_service.decrypt_token(encrypted_token)
+        if not decrypted_token:
+            logger.error(f"Failed to decrypt token for user {telegram_id}")
+            return None
+
+        return JiraService.with_token(decrypted_token)
+
+    def _get_component_service(self, jira_service: JiraService) -> ComponentService:
+        """Get a ComponentService instance for a specific JiraService."""
+        return ComponentService(jira_service)
+
+    def _get_sprint_service(self, jira_service: JiraService) -> SprintService:
+        """Get a SprintService instance for a specific JiraService."""
+        return SprintService(jira_service.jira)
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /start command."""
@@ -42,7 +82,13 @@ class TelegramBot:
             f"Type /help for more commands."
         )
 
-    async def _parse_task_parameters(self, task_description: str, update: Update):
+    async def _parse_task_parameters(
+        self,
+        task_description: str,
+        update: Update,
+        component_service: ComponentService = None,
+        sprint_service: SprintService = None,
+    ):
         """
         Parse task parameters from task_description. Parameters can appear in any order.
         Supported parameters: type:, component:, sprint:, desc:/description:, link:, project:
@@ -57,6 +103,10 @@ class TelegramBot:
         sprint_id = None
         link_issue = None
         project_key = Config.JIRA_PROJECT_KEY
+
+        # Use provided services or fall back to instance services (for backward compatibility)
+        _component_service = component_service or self.component_service
+        _sprint_service = sprint_service or self.sprint_service
 
         # Pattern to find all parameters: type:, component:, sprint:, desc:, description:, link:, project:
         # This captures the parameter name and value up to the next parameter keyword
@@ -109,10 +159,10 @@ class TelegramBot:
                     return None, None, None, None, None, None, None, True
 
             # Process component parameter (needs project_key)
-            if "component" in params:
+            if "component" in params and _component_service:
                 component_label = params["component"]
-                component_name, component_message = (
-                    self.component_service.find_component(component_label, project_key)
+                component_name, component_message = _component_service.find_component(
+                    component_label, project_key
                 )
                 logger.info(
                     f"Selected component '{component_name}' for label '{component_label}' in project '{project_key}'"
@@ -123,11 +173,9 @@ class TelegramBot:
                     return None, None, None, None, None, None, None, True
 
             # Process sprint parameter
-            if "sprint" in params:
+            if "sprint" in params and _sprint_service:
                 sprint_query = params["sprint"]
-                sprint_id, sprint_message = self.sprint_service.find_sprint(
-                    sprint_query
-                )
+                sprint_id, sprint_message = _sprint_service.find_sprint(sprint_query)
 
                 if sprint_message:
                     # Error or ambiguity - notify user
@@ -203,11 +251,21 @@ class TelegramBot:
                 )
                 return
 
+            # Get user's JiraService with their personal token
+            jira_service = self._get_user_jira_service(user.id)
+            if not jira_service:
+                await update.message.reply_text(self.REGISTRATION_REQUIRED_MSG)
+                return
+
             # Check for photo attachments
             photo_attachments = []
             if update.message.photo:
                 photo_attachments = update.message.photo
                 logger.info(f"Found {len(photo_attachments)} photo attachments")
+
+            # Get component and sprint services for this user's jira_service
+            component_service = self._get_component_service(jira_service)
+            sprint_service = self._get_sprint_service(jira_service)
 
             # Parse task parameters using the helper method
             (
@@ -219,7 +277,9 @@ class TelegramBot:
                 link_issue,
                 project_key,
                 should_stop,
-            ) = await self._parse_task_parameters(task_description, update)
+            ) = await self._parse_task_parameters(
+                task_description, update, component_service, sprint_service
+            )
             if should_stop:
                 return
 
@@ -271,7 +331,7 @@ class TelegramBot:
                         "⚠️ Warning: Failed to download some photo attachments. Creating task without them."
                     )
 
-            issue_key, error_message = self.jira_service.create_story(
+            issue_key, error_message = jira_service.create_story(
                 summary=task_description,
                 description=final_description,
                 component_name=component_name,
@@ -288,11 +348,11 @@ class TelegramBot:
                 return
 
             if issue_key:
-                issue_url = self.jira_service.get_issue_url(issue_key)
+                issue_url = jira_service.get_issue_url(issue_key)
 
                 # Link to another issue if specified
                 if link_issue:
-                    link_success = self.jira_service.link_issues(
+                    link_success = jira_service.link_issues(
                         inward_issue=issue_key, outward_issue=link_issue
                     )
                     if link_success:
@@ -400,6 +460,16 @@ class TelegramBot:
                 )
                 return
 
+            # Get user's JiraService with their personal token
+            jira_service = self._get_user_jira_service(user.id)
+            if not jira_service:
+                await update.message.reply_text(self.REGISTRATION_REQUIRED_MSG)
+                return
+
+            # Get component and sprint services for this user's jira_service
+            component_service = self._get_component_service(jira_service)
+            sprint_service = self._get_sprint_service(jira_service)
+
             # Get the user's message text
             message_text = update.message.text or ""
 
@@ -442,7 +512,9 @@ class TelegramBot:
                 link_issue,
                 project_key,
                 should_stop,
-            ) = await self._parse_task_parameters(task_description, update)
+            ) = await self._parse_task_parameters(
+                task_description, update, component_service, sprint_service
+            )
             if should_stop:
                 return
 
@@ -494,7 +566,7 @@ class TelegramBot:
                         "⚠️ Warning: Failed to download some photo attachments. Creating task without them."
                     )
 
-            issue_key, error_message = self.jira_service.create_story(
+            issue_key, error_message = jira_service.create_story(
                 summary=task_description,
                 description=final_description,
                 component_name=component_name,
@@ -511,11 +583,11 @@ class TelegramBot:
                 return
 
             if issue_key:
-                issue_url = self.jira_service.get_issue_url(issue_key)
+                issue_url = jira_service.get_issue_url(issue_key)
 
                 # Link to another issue if specified
                 if link_issue:
-                    link_success = self.jira_service.link_issues(
+                    link_success = jira_service.link_issues(
                         inward_issue=issue_key, outward_issue=link_issue
                     )
                     if link_success:
@@ -548,6 +620,11 @@ class TelegramBot:
         help_text = f"""
 🤖 Jira Bot Commands:
 
+🔐 Регистрация (в приватном чате):
+/register token: <jira-token> - Зарегистрировать ваш Jira токен
+/unregister - Удалить ваш Jira токен
+
+📋 Работа с задачами:
 /task <description> - Create a new Jira task
 /bug <description> - Create a bug (shortcut for /task with type: Bug)
 /story <description> - Create a story (shortcut for /task with type: Story)
@@ -560,12 +637,15 @@ class TelegramBot:
 /desc <issue-key> - Get details of a Jira issue (e.g., /desc 123 or /desc PROJ-123)
 /link message_ref: <uuid> jira: <key> - Store message reference and Jira issue link
 /unlink message_ref: <uuid> jira: <key> - Remove message reference and Jira issue link
+
+ℹ️ Информация:
 /help - Show this help message
 /start - Start the bot
 /userinfo - Show your user information
 /admin - Show admin information (requires authorization)
 
 📝 Examples:
+/register token: ATATT3xFfGF0...
 /task Fix login bug
 /bug Critical authentication error
 /story Add new dashboard component: авиа-параметры
@@ -583,6 +663,8 @@ class TelegramBot:
 /story New UI feature project: DESIGN component: frontend
 
 💡 Features:
+• Для работы с ботом необходимо зарегистрировать свой Jira токен (/register)
+• Регистрация доступна только в приватном чате с ботом
 • Component matching uses transliteration and fuzzy matching for Russian labels
 • Components are fetched dynamically from Jira (DEPRECATED components are filtered out)
 • Sprint matching uses fuzzy matching (e.g., "s3 agent" matches "2025Q4-S3_агент")
@@ -702,6 +784,155 @@ class TelegramBot:
 
         await update.message.reply_text(admin_info)
 
+    async def register_command(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        """Handle the /register command to register user's Jira API token."""
+        if not update.message:
+            return
+
+        user = update.effective_user
+        chat = update.effective_chat
+
+        # Check that this is a private chat (for security)
+        if chat.type != "private":
+            await update.message.reply_text(
+                "❌ Команда /register доступна только в приватном чате с ботом.\n\n"
+                "Пожалуйста, перейдите в приватный чат с @aeroclub_jira_bot "
+                "и вызовите команду /register там."
+            )
+            return
+
+        # Parse command arguments
+        message_text = update.message.text or ""
+        parts = message_text.split(maxsplit=1)
+
+        if len(parts) < 2:
+            await update.message.reply_text(
+                "❌ Пожалуйста, укажите ваш Jira API токен.\n\n"
+                "Использование: `/register token: <ваш-jira-токен>`\n\n"
+                "Пример:\n"
+                "`/register token: ATATT3xFfGF0...`\n\n"
+                "💡 Как получить токен:\n"
+                "1. Перейдите в настройки Jira → Personal Access Tokens\n"
+                "2. Создайте новый токен\n"
+                "3. Скопируйте токен и используйте в этой команде"
+            )
+            return
+
+        # Extract token using regex
+        import re
+
+        param_text = parts[1]
+        token_match = re.search(r"token:\s*(\S+)", param_text, re.IGNORECASE)
+
+        if not token_match:
+            await update.message.reply_text(
+                "❌ Не удалось найти токен в команде.\n\n"
+                "Использование: `/register token: <ваш-jira-токен>`\n\n"
+                "Пример:\n"
+                "`/register token: ATATT3xFfGF0...`"
+            )
+            return
+
+        jira_token = token_match.group(1).strip()
+
+        if len(jira_token) < 10:
+            await update.message.reply_text(
+                "❌ Токен слишком короткий. Пожалуйста, проверьте правильность токена."
+            )
+            return
+
+        # Verify token by trying to connect to Jira
+        try:
+            await update.message.reply_text("🔄 Проверяю токен...")
+            test_service = JiraService.with_token(jira_token)
+            # If we get here, the token is valid
+            logger.info(f"Token verified for user {user.id}")
+        except Exception as e:
+            logger.error(f"Token verification failed for user {user.id}: {e}")
+            await update.message.reply_text(
+                "❌ Не удалось подключиться к Jira с указанным токеном.\n\n"
+                "Пожалуйста, проверьте:\n"
+                "• Правильность токена\n"
+                "• Что токен не истёк\n"
+                "• Что у токена есть необходимые права"
+            )
+            return
+
+        # Encrypt and save token
+        encrypted_token = self.crypto_service.encrypt_token(jira_token)
+        if not encrypted_token:
+            await update.message.reply_text(
+                "❌ Ошибка шифрования токена. Пожалуйста, попробуйте позже."
+            )
+            return
+
+        success, error = self.database_service.save_user_token(
+            telegram_id=user.id,
+            encrypted_token=encrypted_token,
+            username=user.username,
+        )
+
+        if success:
+            await update.message.reply_text(
+                "✅ Регистрация успешна!\n\n"
+                "Теперь вы можете использовать команды:\n"
+                "• /task - создать задачу\n"
+                "• /bug - создать баг\n"
+                "• /story - создать стори\n"
+                "• /desc - просмотреть задачу\n\n"
+                "Все действия будут выполняться от вашего имени в Jira."
+            )
+            logger.info(f"User {user.id} ({user.username}) registered successfully")
+        else:
+            await update.message.reply_text(
+                "❌ Ошибка сохранения токена. Пожалуйста, попробуйте позже."
+            )
+            logger.error(f"Failed to save token for user {user.id}: {error}")
+
+    async def unregister_command(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        """Handle the /unregister command to remove user's Jira API token."""
+        if not update.message:
+            return
+
+        user = update.effective_user
+        chat = update.effective_chat
+
+        # Check that this is a private chat (for security)
+        if chat.type != "private":
+            await update.message.reply_text(
+                "❌ Команда /unregister доступна только в приватном чате с ботом.\n\n"
+                "Пожалуйста, перейдите в приватный чат с @aeroclub_jira_bot "
+                "и вызовите команду /unregister там."
+            )
+            return
+
+        # Check if user is registered
+        if not self.database_service.user_is_registered(user.id):
+            await update.message.reply_text(
+                "ℹ️ Вы не зарегистрированы. Нечего удалять."
+            )
+            return
+
+        # Delete token
+        success, error = self.database_service.delete_user_token(user.id)
+
+        if success:
+            await update.message.reply_text(
+                "✅ Ваш токен успешно удалён.\n\n"
+                "Для использования бота вам нужно будет зарегистрироваться снова "
+                "с помощью команды /register."
+            )
+            logger.info(f"User {user.id} ({user.username}) unregistered successfully")
+        else:
+            await update.message.reply_text(
+                "❌ Ошибка удаления токена. Пожалуйста, попробуйте позже."
+            )
+            logger.error(f"Failed to delete token for user {user.id}: {error}")
+
     async def link_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /link command to store message reference and Jira key in database."""
         if not update.message:
@@ -717,6 +948,12 @@ class TelegramBot:
             logger.warning(
                 f"Unauthorized access attempt by user: {user.username} (ID: {user.id})"
             )
+            return
+
+        # Get user's JiraService with their personal token
+        jira_service = self._get_user_jira_service(user.id)
+        if not jira_service:
+            await update.message.reply_text(self.REGISTRATION_REQUIRED_MSG)
             return
 
         # Parse command arguments
@@ -787,7 +1024,7 @@ class TelegramBot:
                 # Add comment to Jira issue with link to message reference
                 grafana_url = f"{Config.GRAFANA_MESSAGE_URL}{message_ref}"
                 comment = f"Message reference linked: {grafana_url}"
-                comment_added = self.jira_service.add_comment(jira_key, comment)
+                comment_added = jira_service.add_comment(jira_key, comment)
 
                 if comment_added:
                     await update.message.reply_text(
@@ -795,7 +1032,7 @@ class TelegramBot:
                         f"• Message Ref: {message_ref}\n"
                         f"• Jira Issue: {jira_key}\n\n"
                         f"📊 Grafana: {grafana_url}\n"
-                        f"🔗 Jira: {self.jira_service.get_issue_url(jira_key)}",
+                        f"🔗 Jira: {jira_service.get_issue_url(jira_key)}",
                     )
                 else:
                     await update.message.reply_text(
@@ -803,7 +1040,7 @@ class TelegramBot:
                         f"• Message Ref: {message_ref}\n"
                         f"• Jira Issue: {jira_key}\n\n"
                         f"📊 Grafana: {grafana_url}\n"
-                        f"🔗 Jira: {self.jira_service.get_issue_url(jira_key)}",
+                        f"🔗 Jira: {jira_service.get_issue_url(jira_key)}",
                     )
 
                 logger.info(
@@ -963,6 +1200,12 @@ class TelegramBot:
             )
             return
 
+        # Get user's JiraService with their personal token
+        jira_service = self._get_user_jira_service(user.id)
+        if not jira_service:
+            await update.message.reply_text(self.REGISTRATION_REQUIRED_MSG)
+            return
+
         # Get the issue key from the command
         message_text = update.message.text or ""
         parts = message_text.split(maxsplit=1)
@@ -985,7 +1228,7 @@ class TelegramBot:
 
         try:
             # Get issue details from Jira
-            issue_data = self.jira_service.get_issue(issue_key)
+            issue_data = jira_service.get_issue(issue_key)
 
             if not issue_data:
                 await update.message.reply_text(
@@ -1006,7 +1249,7 @@ class TelegramBot:
 **Description:**
 {issue_data["description"]}
 
-🔗 {self.jira_service.get_issue_url(issue_data["key"])}
+🔗 {jira_service.get_issue_url(issue_data["key"])}
 """
 
             # Check if there are image attachments
@@ -1024,7 +1267,7 @@ class TelegramBot:
             if image_attachments:
                 first_image = image_attachments[0]
                 try:
-                    file_path = self.jira_service.download_attachment(
+                    file_path = jira_service.download_attachment(
                         first_image["content_url"], first_image["filename"]
                     )
 
@@ -1056,7 +1299,7 @@ class TelegramBot:
             if image_attachments:
                 for attachment in image_attachments:
                     try:
-                        file_path = self.jira_service.download_attachment(
+                        file_path = jira_service.download_attachment(
                             attachment["content_url"], attachment["filename"]
                         )
 
@@ -1085,7 +1328,7 @@ class TelegramBot:
             if other_attachments:
                 for attachment in other_attachments:
                     try:
-                        file_path = self.jira_service.download_attachment(
+                        file_path = jira_service.download_attachment(
                             attachment["content_url"], attachment["filename"]
                         )
 
@@ -1156,6 +1399,13 @@ class TelegramBot:
                     if update.message.photo:
                         best_photo = update.message.photo[-1]
 
+                        # Get user's JiraService for adding attachment
+                        user = update.effective_user
+                        jira_service = self._get_user_jira_service(user.id)
+                        if not jira_service:
+                            logger.warning(f"User {user.id} not registered, cannot add attachment")
+                            return
+
                         # Download and attach the photo
                         try:
                             photo_file = await context.bot.get_file(best_photo.file_id)
@@ -1171,7 +1421,7 @@ class TelegramBot:
                                 await photo_file.download_to_drive(temp_path)
 
                                 # Add attachment to existing Jira task
-                                self.jira_service.add_attachment(
+                                jira_service.add_attachment(
                                     existing_task_key, temp_path
                                 )
                                 logger.info(
@@ -1314,6 +1564,16 @@ class TelegramBot:
             user = update.effective_user
             chat = update.effective_chat
 
+            # Get user's JiraService with their personal token
+            jira_service = self._get_user_jira_service(user.id)
+            if not jira_service:
+                await update.message.reply_text(self.REGISTRATION_REQUIRED_MSG)
+                return None
+
+            # Get component and sprint services for this user's jira_service
+            component_service = self._get_component_service(jira_service)
+            sprint_service = self._get_sprint_service(jira_service)
+
             # Parse task parameters using the helper method
             (
                 task_description,
@@ -1324,9 +1584,11 @@ class TelegramBot:
                 link_issue,
                 project_key,
                 should_stop,
-            ) = await self._parse_task_parameters(task_description, update)
+            ) = await self._parse_task_parameters(
+                task_description, update, component_service, sprint_service
+            )
             if should_stop:
-                return
+                return None
 
             # Prepare labels for Jira issue
             labels = []
@@ -1375,7 +1637,7 @@ class TelegramBot:
                         "⚠️ Warning: Failed to download some photo attachments. Creating task without them."
                     )
 
-            issue_key, error_message = self.jira_service.create_story(
+            issue_key, error_message = jira_service.create_story(
                 summary=task_description,
                 description=final_description,
                 component_name=component_name,
@@ -1389,14 +1651,14 @@ class TelegramBot:
             if error_message:
                 # If there's an error message, send it to the user
                 await update.message.reply_text(error_message)
-                return
+                return None
 
             if issue_key:
-                issue_url = self.jira_service.get_issue_url(issue_key)
+                issue_url = jira_service.get_issue_url(issue_key)
 
                 # Link to another issue if specified
                 if link_issue:
-                    link_success = self.jira_service.link_issues(
+                    link_success = jira_service.link_issues(
                         inward_issue=issue_key, outward_issue=link_issue
                     )
                     if link_success:
@@ -1428,6 +1690,8 @@ class TelegramBot:
     def setup_handlers(self):
         """Set up command handlers for the bot."""
         self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(CommandHandler("register", self.register_command))
+        self.application.add_handler(CommandHandler("unregister", self.unregister_command))
         self.application.add_handler(CommandHandler("task", self.task_command))
         self.application.add_handler(CommandHandler("bug", self.bug_command))
         self.application.add_handler(CommandHandler("story", self.story_command))
