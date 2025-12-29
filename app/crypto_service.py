@@ -92,3 +92,6 @@ class CryptoService:
         """
         return Fernet.generate_key().decode()
 
+
+
+

@@ -16,3 +16,6 @@ ORDER BY (telegram_id);
 -- based on the updated_at column. This allows users to update their tokens.
 -- jira_token_encrypted contains Fernet-encrypted token data.
 
+
+
+
