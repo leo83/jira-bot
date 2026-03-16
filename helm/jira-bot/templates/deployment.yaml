@@ -104,6 +104,10 @@ spec:
               value: {{ .Values.config.grafanaMessageUrl | quote }}
             - name: ALLOWED_USERS
               value: {{ .Values.config.allowedUsers | quote }}
+            {{- if .Values.config.telegramProxyUrl }}
+            - name: TELEGRAM_PROXY_URL
+              value: {{ .Values.config.telegramProxyUrl | quote }}
+            {{- end }}
           {{- if .Values.config.healthCheck.enabled }}
           livenessProbe:
             exec:

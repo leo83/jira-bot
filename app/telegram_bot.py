@@ -1,4 +1,7 @@
+import asyncio
+import html
 import logging
+import signal
 import tempfile
 from typing import List
 
@@ -1236,21 +1239,23 @@ class TelegramBot:
                 )
                 return
 
-            # Format issue information
-            issue_text = f"""
-📋 **{issue_data["key"]}** - {issue_data["issue_type"]}
+            # Format issue information using HTML to safely handle special chars in Jira content
+            def e(s) -> str:
+                return html.escape(str(s) if s else "")
 
-**Summary:** {issue_data["summary"]}
-
-**Status:** {issue_data["status"]}
-**Assignee:** {issue_data["assignee"]}
-**Reporter:** {issue_data["reporter"]}
-
-**Description:**
-{issue_data["description"]}
-
-🔗 {jira_service.get_issue_url(issue_data["key"])}
-"""
+            desc = e(issue_data["description"]).replace("\n", "\n")
+            issue_text = (
+                f'📋 <b>{e(issue_data["key"])}</b> — {e(issue_data["issue_type"])}\n\n'
+                f'<b>Summary:</b> {e(issue_data["summary"])}\n\n'
+                f'<b>Status:</b> {e(issue_data["status"])}\n'
+                f'<b>Assignee:</b> {e(issue_data["assignee"])}\n'
+                f'<b>Reporter:</b> {e(issue_data["reporter"])}\n\n'
+                f'<b>Description:</b>\n{desc}\n\n'
+                f'🔗 {e(jira_service.get_issue_url(issue_data["key"]))}'
+            )
+            # Telegram caption limit is 1024 chars, text limit is 4096 chars
+            if len(issue_text) > 4096:
+                issue_text = issue_text[:4090] + "\n…"
 
             # Check if there are image attachments
             image_attachments = []
@@ -1272,9 +1277,10 @@ class TelegramBot:
                     )
 
                     if file_path:
+                        caption = issue_text[:1024] if len(issue_text) > 1024 else issue_text
                         with open(file_path, "rb") as f:
                             await update.message.reply_photo(
-                                photo=f, caption=issue_text, parse_mode="Markdown"
+                                photo=f, caption=caption, parse_mode="HTML"
                             )
 
                         # Clean up
@@ -1289,11 +1295,9 @@ class TelegramBot:
                         image_attachments = image_attachments[1:]
                 except Exception as e:
                     logger.error(f"Failed to send first image: {e}")
-                    # Fallback to text-only message
-                    await update.message.reply_text(issue_text, parse_mode="Markdown")
+                    await update.message.reply_text(issue_text, parse_mode="HTML")
             else:
-                # No images, send text only
-                await update.message.reply_text(issue_text, parse_mode="Markdown")
+                await update.message.reply_text(issue_text, parse_mode="HTML")
 
             # Send remaining image attachments
             if image_attachments:
@@ -1710,35 +1714,65 @@ class TelegramBot:
             )
         )
 
-    def run(self):
+    async def run(self):
         """Run the Telegram bot."""
         try:
             # Validate configuration
             Config.validate()
 
             # Create application with increased timeouts for Kubernetes/slow networks
-            self.application = (
+            builder = (
                 Application.builder()
                 .token(Config.TELEGRAM_BOT_TOKEN)
                 .connect_timeout(30.0)
                 .read_timeout(30.0)
                 .write_timeout(30.0)
                 .get_updates_connect_timeout(30.0)
-                .get_updates_read_timeout(60.0)  # long polling can wait up to timeout
+                .get_updates_read_timeout(60.0)
                 .get_updates_write_timeout(30.0)
-                .build()
             )
+
+            if Config.TELEGRAM_PROXY_URL:
+                logger.info(f"Using proxy: {Config.TELEGRAM_PROXY_URL.split('@')[-1]}")
+                builder = builder.proxy(Config.TELEGRAM_PROXY_URL).get_updates_proxy(Config.TELEGRAM_PROXY_URL)
+
+            self.application = builder.build()
 
             # Setup handlers
             self.setup_handlers()
 
-            # run_polling() is synchronous - it manages the event loop itself
-            # bootstrap_retries=3: retry on Telegram API failures during startup
+            # Use explicit async lifecycle to avoid event loop conflicts in Python 3.12.
+            # Retry initialize() in case of cold-start TLS timeout to api.telegram.org.
             logger.info("Starting Telegram bot...")
-            self.application.run_polling(
-                bootstrap_retries=3,
-                timeout=30,  # get_updates long polling timeout (seconds)
-            )
+            retry_delay = 10
+            while True:
+                try:
+                    await self.application.initialize()
+                    break
+                except Exception as e:
+                    logger.warning(f"Telegram API not reachable yet ({e}), retrying in {retry_delay}s...")
+                    await asyncio.sleep(retry_delay)
+
+            try:
+                await self.application.updater.start_polling(timeout=30)
+                await self.application.start()
+                logger.info("Bot is running")
+
+                stop_event = asyncio.Event()
+                loop = asyncio.get_running_loop()
+                for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGABRT):
+                    try:
+                        loop.add_signal_handler(sig, stop_event.set)
+                    except (NotImplementedError, RuntimeError):
+                        pass
+
+                await stop_event.wait()
+
+                logger.info("Stopping bot...")
+                await self.application.updater.stop()
+                await self.application.stop()
+            finally:
+                await self.application.shutdown()
 
         except Exception as e:
             logger.error(f"Failed to start bot: {e}")

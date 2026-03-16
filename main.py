@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import sys
 
@@ -10,16 +11,14 @@ logging.basicConfig(
 )
 
 
-def main():
+async def main():
     """Main entry point for the Jira Telegram bot."""
     try:
         # Validate configuration
         Config.validate()
 
-        # Create and run the bot
-        # run_polling() is synchronous - it manages the event loop itself
         bot = TelegramBot()
-        bot.run()
+        await bot.run()
 
     except ValueError as e:
         print(f"Configuration error: {e}")
@@ -32,7 +31,7 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        asyncio.run(main())
     except Exception as e:
         print(f"Failed to start bot: {e}")
         sys.exit(1)

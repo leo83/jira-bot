@@ -98,6 +98,10 @@ config:
   
   # User authorization
   allowedUsers: ""
+
+  # Proxy for Telegram API (optional)
+  # Format: http://user:pass@host:port
+  telegramProxyUrl: ""
   
   # Token encryption key (32 url-safe base64-encoded bytes)
   # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

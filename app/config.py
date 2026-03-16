@@ -37,6 +37,9 @@ class Config:
     # Key must be 32 url-safe base64-encoded bytes (use Fernet.generate_key() to create one)
     TOKEN_ENCRYPTION_KEY = os.getenv("TOKEN_ENCRYPTION_KEY")
 
+    # Proxy Configuration (optional, for Telegram API access)
+    TELEGRAM_PROXY_URL = os.getenv("TELEGRAM_PROXY_URL")  # e.g. http://user:pass@host:port
+
     @classmethod
     def validate(cls):
         """Validate that all required configuration is present."""
