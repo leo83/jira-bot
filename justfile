@@ -41,15 +41,18 @@ validate:
         echo "❌ JIRA_API_TOKEN needs to be configured"; \
     fi
 
-# Build the production Docker image
-build:
-    just validate
-    docker build -t jira-bot .
-
-# Build the development Docker image
-build-dev:
-    just validate
-    docker build -f Dockerfile.dev -t jira-bot-dev .
+# Build the production Docker image (linux/amd64 for Kubernetes)
+# Version is incremented from registry tags. Use: just docker-build (prod) or just docker-build .rc (RC)
+docker-build extra="":
+    #!/usr/bin/env bash
+    if [ "{{extra}}" = ".rc" ]; then
+        TAG_FULL=$(uv run python scripts/next_rc_version.py)
+    else
+        TAG_FULL=$(uv run python scripts/next_rc_version.py --prod)
+    fi
+    echo Build image with tag $TAG_FULL
+    docker build --platform linux/amd64 -t proget.aeroclub.ru/aeroclub-infrastructure/library/services-ai-jira-bot:$TAG_FULL .
+    docker push proget.aeroclub.ru/aeroclub-infrastructure/library/services-ai-jira-bot:$TAG_FULL
 
 # Run the bot with docker-compose
 run:
@@ -126,3 +129,11 @@ shell:
 start:
     just setup
     @echo "Please edit .env file with your credentials, then run 'just run'"
+
+# Deploy/upgrade Helm release with values-production
+helm-deploy:
+    helm upgrade --install jira-bot ./helm/jira-bot -f helm/jira-bot/values-production.yaml -n production
+
+# Uninstall Helm release
+helm-uninstall:
+    helm uninstall jira-bot -n production

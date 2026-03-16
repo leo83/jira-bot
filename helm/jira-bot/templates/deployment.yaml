@@ -110,7 +110,7 @@ spec:
               command:
               - /app/.venv/bin/python
               - -c
-              - "import requests; requests.get('https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe', timeout=5)"
+              - "import os,urllib.request;urllib.request.urlopen('https://api.telegram.org/bot'+os.environ.get('TELEGRAM_BOT_TOKEN','')+'/getMe',timeout=10)"
             initialDelaySeconds: {{ .Values.config.healthCheck.initialDelaySeconds }}
             periodSeconds: {{ .Values.config.healthCheck.periodSeconds }}
             timeoutSeconds: {{ .Values.config.healthCheck.timeoutSeconds }}
@@ -119,7 +119,7 @@ spec:
               command:
               - /app/.venv/bin/python
               - -c
-              - "import requests; requests.get('https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getMe', timeout=5)"
+              - "import os,urllib.request;urllib.request.urlopen('https://api.telegram.org/bot'+os.environ.get('TELEGRAM_BOT_TOKEN','')+'/getMe',timeout=10)"
             initialDelaySeconds: {{ .Values.config.healthCheck.readinessInitialDelaySeconds }}
             periodSeconds: {{ .Values.config.healthCheck.readinessPeriodSeconds }}
             timeoutSeconds: {{ .Values.config.healthCheck.readinessTimeoutSeconds }}

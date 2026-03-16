@@ -1710,23 +1710,35 @@ class TelegramBot:
             )
         )
 
-    async def run(self):
+    def run(self):
         """Run the Telegram bot."""
         try:
             # Validate configuration
             Config.validate()
 
-            # Create application
+            # Create application with increased timeouts for Kubernetes/slow networks
             self.application = (
-                Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
+                Application.builder()
+                .token(Config.TELEGRAM_BOT_TOKEN)
+                .connect_timeout(30.0)
+                .read_timeout(30.0)
+                .write_timeout(30.0)
+                .get_updates_connect_timeout(30.0)
+                .get_updates_read_timeout(60.0)  # long polling can wait up to timeout
+                .get_updates_write_timeout(30.0)
+                .build()
             )
 
             # Setup handlers
             self.setup_handlers()
 
-            # Start the bot
+            # run_polling() is synchronous - it manages the event loop itself
+            # bootstrap_retries=3: retry on Telegram API failures during startup
             logger.info("Starting Telegram bot...")
-            await self.application.run_polling()
+            self.application.run_polling(
+                bootstrap_retries=3,
+                timeout=30,  # get_updates long polling timeout (seconds)
+            )
 
         except Exception as e:
             logger.error(f"Failed to start bot: {e}")

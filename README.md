@@ -319,21 +319,107 @@ docker-compose restart jira-bot
 
 ## Kubernetes Deployment
 
-### Using Helm (Recommended)
+### Установка через Helm
 
-For production deployments, use Helm charts:
+#### Требования
+
+- Kubernetes-кластер
+- Helm 3.x
+- `kubectl`, настроенный для доступа к кластеру
+
+#### 1. Подготовка values-файла
+
+Скопируйте production values и отредактируйте под своё окружение:
 
 ```bash
-# Build and push image
-docker build -t jira-bot:latest .
-docker tag jira-bot:latest your-registry.com/jira-bot:latest
-docker push your-registry.com/jira-bot:latest
-
-# Deploy with Helm
-helm install jira-bot ./helm/jira-bot -f helm/jira-bot/values-production.yaml -n jira-bot --create-namespace
+cp helm/jira-bot/values-production.yaml helm/jira-bot/values-my-env.yaml
 ```
 
-See [HELM-DEPLOYMENT.md](HELM-DEPLOYMENT.md) for detailed Helm deployment instructions.
+Обязательные параметры в `values-my-env.yaml`:
+
+| Параметр | Описание |
+|----------|----------|
+| `secrets.telegramBotToken` | Токен бота от @BotFather |
+| `secrets.chUser` | Пользователь ClickHouse |
+| `secrets.chPassword` | Пароль ClickHouse |
+| `secrets.tokenEncryptionKey` | Ключ шифрования (Fernet, 32 байта) |
+| `config.jira.url` | URL Jira (например, https://jira.example.com) |
+| `config.jira.projectKey` | Ключ проекта |
+| `config.jira.componentName` | Компонент по умолчанию |
+| `config.clickhouse.host` | Хост ClickHouse |
+
+Сгенерировать ключ шифрования:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+#### 2. Сборка и публикация образа
+
+```bash
+# Сборка
+just build
+# или
+docker build -t proget.aeroclub.ru/aeroclub-infrastructure/library/services-ai-jira-bot:latest .
+
+# Тегирование и публикация
+docker tag proget.aeroclub.ru/aeroclub-infrastructure/library/services-ai-jira-bot:latest \
+  proget.aeroclub.ru/aeroclub-infrastructure/library/services-ai-jira-bot:<версия>
+docker push proget.aeroclub.ru/aeroclub-infrastructure/library/services-ai-jira-bot:<версия>
+```
+
+В `values-my-env.yaml` укажите нужный тег образа:
+
+```yaml
+image:
+  repository: proget.aeroclub.ru/aeroclub-infrastructure/library/services-ai-jira-bot
+  tag: "20260316.1"  # ваша версия
+```
+
+#### 3. Установка
+
+```bash
+# Установка в namespace jira-bot
+helm install jira-bot ./helm/jira-bot \
+  -f helm/jira-bot/values-my-env.yaml \
+  -n jira-bot \
+  --create-namespace
+
+# Или с namespace из values-файла
+helm install jira-bot ./helm/jira-bot \
+  -f helm/jira-bot/values-my-env.yaml \
+  -n production \
+  --create-namespace
+```
+
+#### 4. Обновление
+
+```bash
+helm upgrade jira-bot ./helm/jira-bot \
+  -f helm/jira-bot/values-my-env.yaml \
+  -n jira-bot
+```
+
+#### 5. Проверка
+
+```bash
+# Статус релиза
+helm status jira-bot -n jira-bot
+
+# Поды
+kubectl get pods -n jira-bot -l app.kubernetes.io/name=jira-bot
+
+# Логи
+kubectl logs -n jira-bot -l app.kubernetes.io/name=jira-bot -f
+```
+
+#### 6. Удаление
+
+```bash
+helm uninstall jira-bot -n jira-bot
+```
+
+Подробнее см. [HELM-DEPLOYMENT.md](HELM-DEPLOYMENT.md).
 
 ### Using Raw Kubernetes Manifests
 
@@ -341,9 +427,8 @@ For simple deployments, use raw Kubernetes manifests:
 
 ```bash
 # Build and push image
-docker build -t jira-bot:latest .
-docker tag jira-bot:latest your-registry.com/jira-bot:latest
-docker push your-registry.com/jira-bot:latest
+docker build -t proget.aeroclub.ru/aeroclub-infrastructure/library/services-ai-jira-bot:<your_tag> .
+docker push proget.aeroclub.ru/aeroclub-infrastructure/library/services-ai-jira-bot:<your_tag>
 
 # Deploy to Kubernetes
 kubectl apply -f k8s-secrets.yaml

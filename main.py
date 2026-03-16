@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import sys
 
@@ -11,15 +10,16 @@ logging.basicConfig(
 )
 
 
-async def main():
+def main():
     """Main entry point for the Jira Telegram bot."""
     try:
         # Validate configuration
         Config.validate()
 
         # Create and run the bot
+        # run_polling() is synchronous - it manages the event loop itself
         bot = TelegramBot()
-        await bot.run()
+        bot.run()
 
     except ValueError as e:
         print(f"Configuration error: {e}")
@@ -32,11 +32,7 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        # Use nest_asyncio to handle nested event loops
-        import nest_asyncio
-
-        nest_asyncio.apply()
-        asyncio.run(main())
+        main()
     except Exception as e:
         print(f"Failed to start bot: {e}")
         sys.exit(1)
