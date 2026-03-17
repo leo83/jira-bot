@@ -383,7 +383,7 @@ class TelegramBot:
 
     async def bug_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /bug command as a shortcut for creating a bug."""
-        logger.info("DEBUG: bug_command triggered")
+        logger.debug("DEBUG: bug_command triggered")
         # Get the task description and force type to Bug
         if update.message and update.message.text:
             # Get everything after /bug
@@ -412,7 +412,7 @@ class TelegramBot:
 
     async def story_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /story command as a shortcut for creating a story."""
-        logger.info("DEBUG: story_command triggered")
+        logger.debug("DEBUG: story_command triggered")
         # Get the task description and force type to Story
         if update.message and update.message.text:
             # Get everything after /story
@@ -441,10 +441,10 @@ class TelegramBot:
 
     async def task_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /task command to create a Jira story."""
-        logger.info("DEBUG: task_command triggered")
-        logger.info(f"DEBUG: Message text: '{update.message.text}'")
-        logger.info(f"DEBUG: Message caption: '{update.message.caption}'")
-        logger.info(f"DEBUG: Has photos: {bool(update.message.photo)}")
+        logger.debug("DEBUG: task_command triggered")
+        logger.debug(f"DEBUG: Message text: '{update.message.text}'")
+        logger.debug(f"DEBUG: Message caption: '{update.message.caption}'")
+        logger.debug(f"DEBUG: Has photos: {bool(update.message.photo)}")
         try:
             # Check if message exists
             if not update.message:
@@ -485,11 +485,11 @@ class TelegramBot:
             # Extract the task description (everything after /task)
             if message_text and len(message_text.split()) > 1:
                 task_description = " ".join(message_text.split()[1:])
-                logger.info(f"DEBUG: Task description from text: '{task_description}'")
+                logger.debug(f"DEBUG: Task description from text: '{task_description}'")
             elif photo_attachments and not message_text:
                 # If there are photos but no text, use a default description
                 task_description = "Task with image attachment"
-                logger.info("DEBUG: Using default description for photo-only task")
+                logger.debug("DEBUG: Using default description for photo-only task")
             else:
                 await update.message.reply_text(
                     "❌ Please provide a task description.\n\n"
@@ -731,7 +731,7 @@ class TelegramBot:
                 ) as temp_file:
                     temp_path = temp_file.name
 
-                logger.info(f"DEBUG: Creating temp file for photo {i + 1}: {temp_path}")
+                logger.debug(f"DEBUG: Creating temp file for photo {i + 1}: {temp_path}")
                 logger.info(
                     f"DEBUG: Photo details - file_id: {photo.file_id}, size: {photo.file_size}"
                 )
@@ -739,7 +739,7 @@ class TelegramBot:
                 # Download the file
                 await file.download_to_drive(temp_path)
                 downloaded_files.append(temp_path)
-                logger.info(f"DEBUG: Downloaded unique photo {i + 1} to {temp_path}")
+                logger.debug(f"DEBUG: Downloaded unique photo {i + 1} to {temp_path}")
 
             except Exception as e:
                 logger.error(f"Failed to download photo {i + 1}: {e}")
@@ -1369,11 +1369,11 @@ class TelegramBot:
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ):
         """Handle photo-only messages (no text, just photos)."""
-        logger.info("DEBUG: photo_message_handler triggered")
-        logger.info(f"DEBUG: Message text: '{update.message.text}'")
-        logger.info(f"DEBUG: Message caption: '{update.message.caption}'")
-        logger.info(f"DEBUG: Has photos: {bool(update.message.photo)}")
-        logger.info(f"DEBUG: Media group ID: '{update.message.media_group_id}'")
+        logger.debug("DEBUG: photo_message_handler triggered")
+        logger.debug(f"DEBUG: Message text: '{update.message.text}'")
+        logger.debug(f"DEBUG: Message caption: '{update.message.caption}'")
+        logger.debug(f"DEBUG: Has photos: {bool(update.message.photo)}")
+        logger.debug(f"DEBUG: Media group ID: '{update.message.media_group_id}'")
         try:
             # Check if message exists
             if not update.message:
@@ -1448,7 +1448,7 @@ class TelegramBot:
                     return
 
                 # This is the first photo in the media group
-                logger.info(f"DEBUG: First photo in media group {media_group_id}")
+                logger.debug(f"DEBUG: First photo in media group {media_group_id}")
 
                 # Process the caption to extract task details
                 caption = update.message.caption or ""
@@ -1505,7 +1505,7 @@ class TelegramBot:
                             )
                 else:
                     # No command, just ignore the photo
-                    logger.info("DEBUG: Media group photo without command - ignoring")
+                    logger.debug("DEBUG: Media group photo without command - ignoring")
 
                 return
 
@@ -1551,7 +1551,7 @@ class TelegramBot:
                 return
 
             # If photo doesn't have /task, /bug, or /story command, ignore it (just a regular photo message)
-            logger.info("DEBUG: Photo without command - ignoring")
+            logger.debug("DEBUG: Photo without command - ignoring")
             return
 
         except Exception as e:
