@@ -1,11 +1,14 @@
 import asyncio
+import functools
 import html
 import logging
 import signal
 import tempfile
 from typing import List
 
+import backoff  # type: ignore[import-untyped]
 from telegram import Update
+from telegram.error import NetworkError
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -1369,16 +1372,16 @@ class TelegramBot:
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ):
         """Handle photo-only messages (no text, just photos)."""
-        logger.debug("DEBUG: photo_message_handler triggered")
-        logger.debug(f"DEBUG: Message text: '{update.message.text}'")
-        logger.debug(f"DEBUG: Message caption: '{update.message.caption}'")
-        logger.debug(f"DEBUG: Has photos: {bool(update.message.photo)}")
-        logger.debug(f"DEBUG: Media group ID: '{update.message.media_group_id}'")
         try:
-            # Check if message exists
             if not update.message:
                 logger.warning("Received update without message")
                 return
+
+            logger.debug(f"DEBUG: photo_message_handler triggered")
+            logger.debug(f"DEBUG: Message text: '{update.message.text}'")
+            logger.debug(f"DEBUG: Message caption: '{update.message.caption}'")
+            logger.debug(f"DEBUG: Has photos: {bool(update.message.photo)}")
+            logger.debug(f"DEBUG: Media group ID: '{update.message.media_group_id}'")
 
             # Check if this is part of a media group (multiple photos sent together)
             if update.message.media_group_id:
@@ -1691,26 +1694,70 @@ class TelegramBot:
             )
             return None
 
+    def _with_retry(self, handler, max_retries: int = 3):
+        """Wrap a handler with retry logic for transient Telegram NetworkErrors.
+
+        Uses exponential backoff (2^n seconds) up to max_retries attempts.
+        After all retries are exhausted, notifies the user and returns without crashing.
+        """
+
+        @functools.wraps(handler)
+        async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            @backoff.on_exception(
+                backoff.expo,
+                NetworkError,
+                max_tries=max_retries,
+                base=2,
+                logger=logger,
+            )
+            async def _call():
+                return await handler(update, context)
+
+            try:
+                return await _call()
+            except NetworkError as e:
+                logger.error(
+                    f"{handler.__name__}: network error after {max_retries} retries: {e}"
+                )
+                if update and getattr(update, "message", None):
+                    try:
+                        await update.message.reply_text(
+                            "⚠️ Проблема с соединением с Telegram. Попробуйте команду ещё раз."
+                        )
+                    except Exception:
+                        pass
+
+        return wrapper
+
+    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
+        """Handle unhandled errors. Suppress transient network errors from proxy disconnects."""
+        err = context.error
+        if isinstance(err, NetworkError):
+            logger.debug(f"Transient network error (proxy disconnect): {err}")
+            return
+        logger.error(f"Unhandled exception: {err}", exc_info=err)
+
     def setup_handlers(self):
         """Set up command handlers for the bot."""
-        self.application.add_handler(CommandHandler("start", self.start_command))
-        self.application.add_handler(CommandHandler("register", self.register_command))
-        self.application.add_handler(CommandHandler("unregister", self.unregister_command))
-        self.application.add_handler(CommandHandler("task", self.task_command))
-        self.application.add_handler(CommandHandler("bug", self.bug_command))
-        self.application.add_handler(CommandHandler("story", self.story_command))
-        self.application.add_handler(CommandHandler("link", self.link_command))
-        self.application.add_handler(CommandHandler("unlink", self.unlink_command))
-        self.application.add_handler(CommandHandler("desc", self.desc_command))
-        self.application.add_handler(CommandHandler("help", self.help_command))
-        self.application.add_handler(CommandHandler("userinfo", self.userinfo_command))
-        self.application.add_handler(CommandHandler("admin", self.admin_command))
+        self.application.add_error_handler(self.error_handler)
+        self.application.add_handler(CommandHandler("start", self._with_retry(self.start_command)))
+        self.application.add_handler(CommandHandler("register", self._with_retry(self.register_command)))
+        self.application.add_handler(CommandHandler("unregister", self._with_retry(self.unregister_command)))
+        self.application.add_handler(CommandHandler("task", self._with_retry(self.task_command)))
+        self.application.add_handler(CommandHandler("bug", self._with_retry(self.bug_command)))
+        self.application.add_handler(CommandHandler("story", self._with_retry(self.story_command)))
+        self.application.add_handler(CommandHandler("link", self._with_retry(self.link_command)))
+        self.application.add_handler(CommandHandler("unlink", self._with_retry(self.unlink_command)))
+        self.application.add_handler(CommandHandler("desc", self._with_retry(self.desc_command)))
+        self.application.add_handler(CommandHandler("help", self._with_retry(self.help_command)))
+        self.application.add_handler(CommandHandler("userinfo", self._with_retry(self.userinfo_command)))
+        self.application.add_handler(CommandHandler("admin", self._with_retry(self.admin_command)))
         # Handle photo-only messages (no text, just photos, and not commands)
         # This should only trigger for messages that have photos but NO text at all
         self.application.add_handler(
             MessageHandler(
                 filters.PHOTO & ~filters.TEXT,
-                self.photo_message_handler,
+                self._with_retry(self.photo_message_handler),
             )
         )
 
