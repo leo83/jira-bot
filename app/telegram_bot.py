@@ -2,6 +2,7 @@ import asyncio
 import functools
 import html
 import logging
+import os
 import signal
 import tempfile
 from typing import List
@@ -1716,16 +1717,11 @@ class TelegramBot:
             try:
                 return await _call()
             except NetworkError as e:
-                logger.error(
-                    f"{handler.__name__}: network error after {max_retries} retries: {e}"
+                logger.critical(
+                    f"{handler.__name__}: Telegram unreachable after {max_retries} retries: {e}. "
+                    "Restarting application..."
                 )
-                if update and getattr(update, "message", None):
-                    try:
-                        await update.message.reply_text(
-                            "⚠️ Проблема с соединением с Telegram. Попробуйте команду ещё раз."
-                        )
-                    except Exception:
-                        pass
+                os._exit(1)
 
         return wrapper
 
