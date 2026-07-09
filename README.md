@@ -4,7 +4,11 @@ A Telegram bot that creates Jira stories in your Jira project with customizable 
 
 ## Features
 
-- `/task <description>` - Creates a new Jira story in your configured project
+- `/register token: <jira-token>` - Register your personal Jira token (private chat only)
+- `/task <description>` - Creates a new Jira issue (supports `type:`, `component:`, `sprint:`, `link:`, `project:`, `desc:` params)
+- `/bug <description>` / `/story <description>` - Shortcuts for creating a bug / story
+- `/desc <issue-key>` - Show details of a Jira issue (with attachments)
+- `/search <words>` - Full-text search issues by summary and description (defaults to project AAI; use `project: <key>` for another project or `project: all` for all)
 - `/help` - Shows available commands
 - `/start` - Starts the bot
 

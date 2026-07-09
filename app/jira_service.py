@@ -312,6 +312,78 @@ class JiraService:
             logger.error(f"Unexpected error getting issue {issue_key}: {e}")
             return None
 
+    @staticmethod
+    def _escape_jql_text(text: str) -> str:
+        """
+        Escape a user string so it can be embedded inside a double-quoted JQL value.
+
+        Only JQL-level escaping is done (backslash, then double-quote). Lucene
+        metacharacters (``+ - ~ * ? : ( )`` …) are intentionally left alone;
+        search_issues wraps the query in try/except so an unparseable query
+        (e.g. ``C++``) degrades to a friendly message instead of a crash.
+        """
+        return text.replace("\\", "\\\\").replace('"', '\\"')
+
+    def search_issues(
+        self,
+        query: str,
+        project_key: Optional[str] = None,
+        max_results: int = 10,
+    ) -> tuple[Optional[List[dict]], Optional[str]]:
+        """
+        Full-text search for issues by summary and description.
+
+        Args:
+            query (str): Free-text search query
+            project_key (str, optional): Restrict search to this project. If None,
+                searches all projects the user can access.
+            max_results (int): Maximum number of issues to return
+
+        Returns:
+            tuple: (results, error_message) - results is a list of issue dicts
+                   (key, summary, status, issue_type) or None if the search failed,
+                   error_message is a user-friendly message when the search failed.
+        """
+        escaped = self._escape_jql_text(query)
+        text_clause = f'(summary ~ "{escaped}" OR description ~ "{escaped}")'
+
+        if project_key:
+            jql = f'project = "{project_key}" AND {text_clause} ORDER BY updated DESC'
+        else:
+            jql = f"{text_clause} ORDER BY updated DESC"
+
+        logger.info(f"Searching issues with JQL: {jql}")
+
+        try:
+            issues = self.jira.search_issues(
+                jql,
+                maxResults=max_results,
+                fields="summary,status,issuetype",
+            )
+
+            results = [
+                {
+                    "key": issue.key,
+                    "summary": issue.fields.summary,
+                    "status": issue.fields.status.name,
+                    "issue_type": issue.fields.issuetype.name,
+                }
+                for issue in issues
+            ]
+
+            logger.info(f"Search returned {len(results)} issues for query '{query}'")
+            return results, None
+
+        except JIRAError as e:
+            logger.error(f"Failed to search issues for '{query}': {e}")
+            return None, (
+                f"❌ Не удалось выполнить поиск по запросу '{query}'.\n"
+                "Попробуйте изменить формулировку (уберите спецсимволы)."
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error searching issues for '{query}': {e}")
+            return None, "❌ Произошла ошибка при поиске. Попробуйте позже."
+
     def download_attachment(
         self, attachment_url: str, attachment_filename: str
     ) -> Optional[str]:

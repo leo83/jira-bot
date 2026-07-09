@@ -642,6 +642,8 @@ class TelegramBot:
 /task <description> project: <key> - Create task in a specific project (default: AAI)
 /task desc: <description> - Use description after "desc:" as task description
 /desc <issue-key> - Get details of a Jira issue (e.g., /desc 123 or /desc PROJ-123)
+/search <words> - Full-text search issues by summary and description (default project: AAI)
+/search <words> project: <key> - Search within another project (project: all - search everywhere)
 /link message_ref: <uuid> jira: <key> - Store message reference and Jira issue link
 /unlink message_ref: <uuid> jira: <key> - Remove message reference and Jira issue link
 
@@ -658,6 +660,8 @@ class TelegramBot:
 /story Add new dashboard component: авиа-параметры
 /desc 123
 /desc PROJ-456
+/search login timeout
+/search оплата картой project: SV
 /link message_ref: 550e8400-e29b-41d4-a716-446655440000 jira: AAI-1020
 /unlink message_ref: 550e8400-e29b-41d4-a716-446655440000 jira: AAI-1020
 /task Fix critical bug type: Bug
@@ -1369,6 +1373,112 @@ class TelegramBot:
                 "❌ An error occurred while fetching the issue. Please try again later."
             )
 
+    async def search_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle the /search command to full-text search issues by summary + description."""
+        if not update.message:
+            return
+
+        user = update.effective_user
+
+        # Check user permissions
+        if not UserConfig.is_user_allowed(user.username, user.id):
+            await update.message.reply_text(
+                "❌ Access denied. You are not authorized to search Jira tasks."
+            )
+            logger.warning(
+                f"Unauthorized access attempt by user: {user.username} (ID: {user.id})"
+            )
+            return
+
+        # Get user's JiraService with their personal token
+        jira_service = self._get_user_jira_service(user.id)
+        if not jira_service:
+            await update.message.reply_text(self.REGISTRATION_REQUIRED_MSG)
+            return
+
+        # Get the search query from the command
+        message_text = update.message.text or ""
+        parts = message_text.split(maxsplit=1)
+
+        if len(parts) < 2 or not parts[1].strip():
+            await update.message.reply_text(
+                f"❌ Please provide search words.\n\n"
+                "Usage: `/search <words>`\n"
+                f"By default searches in project {Config.JIRA_PROJECT_KEY}.\n"
+                "Examples:\n"
+                "  • `/search login timeout`\n"
+                "  • `/search оплата картой`\n"
+                "  • `/search dashboard project: SV` - search within another project\n"
+                "  • `/search dashboard project: all` - search across all projects"
+            )
+            return
+
+        query_text = parts[1].strip()
+
+        # Extract optional project: parameter. Default to the configured project;
+        # "project: all" searches across every accessible project.
+        import re
+
+        project_key = Config.JIRA_PROJECT_KEY
+        project_match = re.search(r"project:\s*(\S+)", query_text, re.IGNORECASE)
+        if project_match:
+            raw_project = project_match.group(1).strip()
+            query_text = re.sub(
+                r"project:\s*\S+", "", query_text, flags=re.IGNORECASE
+            ).strip()
+            project_key = None if raw_project.lower() == "all" else raw_project.upper()
+
+        if not query_text:
+            await update.message.reply_text(
+                "❌ Please provide search words in addition to the project."
+            )
+            return
+
+        scope = f" in project {project_key}" if project_key else " across all projects"
+        await update.message.reply_text(f"🔍 Searching for '{query_text}'{scope}...")
+
+        try:
+            results, error_message = jira_service.search_issues(
+                query_text, project_key=project_key
+            )
+
+            if error_message:
+                await update.message.reply_text(error_message)
+                return
+
+            if not results:
+                await update.message.reply_text(
+                    f"🔍 No issues found matching '{query_text}'{scope}."
+                )
+                return
+
+            def esc(s) -> str:
+                return html.escape(str(s) if s else "")
+
+            lines = [
+                f"🔍 Found {len(results)} issue(s) for '{esc(query_text)}'{esc(scope)}:\n"
+            ]
+            for r in results:
+                url = jira_service.get_issue_url(r["key"])
+                lines.append(
+                    f'📋 <a href="{esc(url)}">{esc(r["key"])}</a> '
+                    f'[{esc(r["status"])}] — {esc(r["summary"])}'
+                )
+
+            result_text = "\n".join(lines)
+            if len(result_text) > 4096:
+                result_text = result_text[:4090] + "\n…"
+
+            await update.message.reply_text(
+                result_text, parse_mode="HTML", disable_web_page_preview=True
+            )
+
+        except Exception as e:
+            logger.error(f"Error in search_command: {e}")
+            await update.message.reply_text(
+                "❌ An error occurred while searching. Please try again later."
+            )
+
     async def photo_message_handler(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ):
@@ -1745,6 +1855,7 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("link", self._with_retry(self.link_command)))
         self.application.add_handler(CommandHandler("unlink", self._with_retry(self.unlink_command)))
         self.application.add_handler(CommandHandler("desc", self._with_retry(self.desc_command)))
+        self.application.add_handler(CommandHandler("search", self._with_retry(self.search_command)))
         self.application.add_handler(CommandHandler("help", self._with_retry(self.help_command)))
         self.application.add_handler(CommandHandler("userinfo", self._with_retry(self.userinfo_command)))
         self.application.add_handler(CommandHandler("admin", self._with_retry(self.admin_command)))

@@ -25,8 +25,13 @@ packages = ["app"]
 [dependency-groups]
 dev = [
     "pytest>=7.0",
+    "pytest-asyncio>=0.23",
     "black>=23.0",
     "isort>=5.0",
     "flake8>=6.0",
     "mypy>=1.0"
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
