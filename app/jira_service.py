@@ -64,6 +64,8 @@ class JiraService:
         sprint_id: int = None,
         labels: List[str] = None,
         project_key: str = None,
+        assignee: str = None,
+        epic_key: str = None,
     ) -> tuple[Optional[str], Optional[str]]:
         """
         Create a new Jira issue in the configured project with specified component and type.
@@ -133,6 +135,30 @@ class JiraService:
             # Create the issue
             new_issue = self.jira.create_issue(fields=issue_dict)
             logger.info(f"Created issue: {new_issue.key}")
+
+            # Assign the issue if an assignee was resolved. Done via assign_issue
+            # (separate REST endpoint) rather than the create fields, so it works
+            # even when the assignee field is not on the project's Create screen.
+            # Best-effort: a failed assignment must not fail issue creation.
+            if assignee:
+                try:
+                    self.jira.assign_issue(new_issue.key, assignee)
+                    logger.info(f"Assigned issue {new_issue.key} to {assignee}")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to assign issue {new_issue.key} to {assignee}: {e}"
+                    )
+
+            # Link the issue to an epic if provided. Best-effort (separate Agile
+            # endpoint): a failed epic link must not fail issue creation.
+            if epic_key:
+                try:
+                    self.jira.add_issues_to_epic(epic_key, [new_issue.key])
+                    logger.info(f"Added issue {new_issue.key} to epic {epic_key}")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to add issue {new_issue.key} to epic {epic_key}: {e}"
+                    )
 
             # Add issue to sprint if sprint_id provided
             if sprint_id:
@@ -324,6 +350,26 @@ class JiraService:
         """
         return text.replace("\\", "\\\\").replace('"', '\\"')
 
+    def _build_text_clause(self, query: str) -> str:
+        """
+        Build the JQL text clause for a free-text query.
+
+        Semantics:
+          * case-insensitive — each word is lowercased (Lucene wildcard queries
+            are not analyzed, so lowercasing is what makes them match the
+            lowercased index);
+          * partial words — each word gets a trailing ``*`` so it matches by word
+            prefix (e.g. ``log`` matches "login", "logs");
+          * all words required, any order — words are joined with AND, each
+            matched against summary OR description, so two words need not be
+            adjacent (or even in the same field).
+        """
+        clauses = []
+        for word in query.split():
+            term = self._escape_jql_text(word.lower())
+            clauses.append(f'(summary ~ "{term}*" OR description ~ "{term}*")')
+        return " AND ".join(clauses)
+
     def search_issues(
         self,
         query: str,
@@ -332,6 +378,9 @@ class JiraService:
     ) -> tuple[Optional[List[dict]], Optional[str]]:
         """
         Full-text search for issues by summary and description.
+
+        Matching is case-insensitive, by word prefix, and requires every query
+        word to appear (in any order) in the summary or description.
 
         Args:
             query (str): Free-text search query
@@ -344,8 +393,9 @@ class JiraService:
                    (key, summary, status, issue_type) or None if the search failed,
                    error_message is a user-friendly message when the search failed.
         """
-        escaped = self._escape_jql_text(query)
-        text_clause = f'(summary ~ "{escaped}" OR description ~ "{escaped}")'
+        text_clause = self._build_text_clause(query)
+        if not text_clause:
+            return [], None
 
         if project_key:
             jql = f'project = "{project_key}" AND {text_clause} ORDER BY updated DESC'

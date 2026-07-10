@@ -18,12 +18,15 @@ from telegram.ext import (
     filters,
 )
 
+from .assignee_service import AssigneeService
 from .component_service import ComponentService
 from .config import Config
 from .crypto_service import CryptoService
 from .database_service import DatabaseService
+from .epic_service import EpicService
 from .issue_type_service import IssueTypeService
 from .jira_service import JiraService
+from .llm_service import LLMService
 from .sprint_service import SprintService
 from .users import UserConfig
 
@@ -44,11 +47,15 @@ class TelegramBot:
         """Initialize the Telegram bot."""
         self.database_service = DatabaseService()
         self.crypto_service = CryptoService()
+        # Shared LLM client (optional) used for assignee guessing.
+        self.llm_service = LLMService()
         # Note: jira_service is now created per-user with their personal token
         # We keep a default one for backward compatibility (if needed)
         self.jira_service = None  # Will be initialized lazily if needed
         self.component_service = None
         self.sprint_service = None
+        self.assignee_service = None
+        self.epic_service = None
         self.application = None
 
     def _get_user_jira_service(self, telegram_id: int) -> JiraService | None:
@@ -80,6 +87,14 @@ class TelegramBot:
         """Get a SprintService instance for a specific JiraService."""
         return SprintService(jira_service.jira)
 
+    def _get_assignee_service(self, jira_service: JiraService) -> AssigneeService:
+        """Get an AssigneeService instance for a specific JiraService."""
+        return AssigneeService(jira_service, self.llm_service)
+
+    def _get_epic_service(self, jira_service: JiraService) -> EpicService:
+        """Get an EpicService instance for a specific JiraService."""
+        return EpicService(jira_service, self.llm_service)
+
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /start command."""
         if not update.message:
@@ -95,11 +110,13 @@ class TelegramBot:
         update: Update,
         component_service: ComponentService = None,
         sprint_service: SprintService = None,
+        assignee_service: AssigneeService = None,
+        epic_service: EpicService = None,
     ):
         """
         Parse task parameters from task_description. Parameters can appear in any order.
-        Supported parameters: type:, component:, sprint:, desc:/description:, link:, project:
-        Returns: (summary, description, component_name, issue_type, sprint_id, link_issue, project_key, should_stop)
+        Supported parameters: type:, component:, sprint:, desc:/description:, link:, project:, assignee:/who:, epic:
+        Returns: (summary, description, component_name, issue_type, sprint_id, link_issue, project_key, assignee, epic_key, should_stop)
         """
         import re
 
@@ -110,16 +127,20 @@ class TelegramBot:
         sprint_id = None
         link_issue = None
         project_key = Config.JIRA_PROJECT_KEY
+        assignee_username = None
+        epic_key = None
 
         # Use provided services or fall back to instance services (for backward compatibility)
         _component_service = component_service or self.component_service
         _sprint_service = sprint_service or self.sprint_service
+        _assignee_service = assignee_service or getattr(self, "assignee_service", None)
+        _epic_service = epic_service or getattr(self, "epic_service", None)
 
-        # Pattern to find all parameters: type:, component:, sprint:, desc:, description:, link:, project:
-        # This captures the parameter name and value up to the next parameter keyword
-        # re.DOTALL allows . to match newlines so desc: can contain multi-line text
-        # The lookahead stops at word boundary before next parameter keyword (no space required)
-        param_pattern = r"(type:|component:|sprint:|desc:|description:|link:|project:)\s*(.+?)(?=\s*\b(?:type:|component:|sprint:|desc:|description:|link:|project:)|$)"
+        # Pattern to find all parameters. Captures the parameter name and value up
+        # to the next parameter keyword. re.DOTALL lets desc: span newlines; the
+        # lookahead stops at the next keyword. NOTE: the keyword list must be kept
+        # identical in the capture group and the lookahead, or summary extraction breaks.
+        param_pattern = r"(type:|component:|sprint:|desc:|description:|link:|project:|assignee:|who:|epic:)\s*(.+?)(?=\s*\b(?:type:|component:|sprint:|desc:|description:|link:|project:|assignee:|who:|epic:)|$)"
 
         matches = list(
             re.finditer(param_pattern, task_description, re.IGNORECASE | re.DOTALL)
@@ -135,6 +156,10 @@ class TelegramBot:
                 # Handle desc/description as the same parameter
                 if param_name in ["desc", "description"]:
                     param_name = "description"
+
+                # Handle who as an alias for assignee
+                if param_name == "who":
+                    param_name = "assignee"
 
                 params[param_name] = param_value
 
@@ -163,7 +188,7 @@ class TelegramBot:
 
                 if issue_type_message:
                     await update.message.reply_text(issue_type_message)
-                    return None, None, None, None, None, None, None, True
+                    return None, None, None, None, None, None, None, None, None, True
 
             # Process component parameter (needs project_key)
             if "component" in params and _component_service:
@@ -177,7 +202,7 @@ class TelegramBot:
 
                 if component_message:
                     await update.message.reply_text(component_message)
-                    return None, None, None, None, None, None, None, True
+                    return None, None, None, None, None, None, None, None, None, True
 
             # Process sprint parameter
             if "sprint" in params and _sprint_service:
@@ -187,7 +212,7 @@ class TelegramBot:
                 if sprint_message:
                     # Error or ambiguity - notify user
                     await update.message.reply_text(sprint_message)
-                    return None, None, None, None, None, None, None, True
+                    return None, None, None, None, None, None, None, None, None, True
 
                 logger.info(
                     f"Selected sprint ID: {sprint_id} for query '{sprint_query}'"
@@ -205,6 +230,36 @@ class TelegramBot:
                 if link_issue.isdigit():
                     link_issue = f"{project_key}-{link_issue}"
                 logger.info(f"Extracted link issue: '{link_issue}'")
+
+            # Process assignee parameter (needs project_key to fetch the user pool)
+            if "assignee" in params and _assignee_service:
+                assignee_query = params["assignee"]
+                assignee_username, assignee_message = _assignee_service.find_assignee(
+                    assignee_query, project_key
+                )
+
+                if assignee_message:
+                    # Not found / ambiguous - notify user and stop
+                    await update.message.reply_text(assignee_message)
+                    return None, None, None, None, None, None, None, None, None, True
+
+                logger.info(
+                    f"Selected assignee '{assignee_username}' for query '{assignee_query}'"
+                )
+
+            # Process epic parameter (needs project_key to fetch the epic pool)
+            if "epic" in params and _epic_service:
+                epic_query = params["epic"]
+                epic_key, epic_message = _epic_service.find_epic(
+                    epic_query, project_key
+                )
+
+                if epic_message:
+                    # Not found / ambiguous - notify user and stop
+                    await update.message.reply_text(epic_message)
+                    return None, None, None, None, None, None, None, None, None, True
+
+                logger.info(f"Selected epic '{epic_key}' for query '{epic_query}'")
 
             # Use summary from what's left after removing parameters
             task_description = summary
@@ -238,6 +293,8 @@ class TelegramBot:
             sprint_id,
             link_issue,
             project_key,
+            assignee_username,
+            epic_key,
             False,
         )
 
@@ -270,9 +327,11 @@ class TelegramBot:
                 photo_attachments = update.message.photo
                 logger.info(f"Found {len(photo_attachments)} photo attachments")
 
-            # Get component and sprint services for this user's jira_service
+            # Get component, sprint, assignee and epic services for this user's jira_service
             component_service = self._get_component_service(jira_service)
             sprint_service = self._get_sprint_service(jira_service)
+            assignee_service = self._get_assignee_service(jira_service)
+            epic_service = self._get_epic_service(jira_service)
 
             # Parse task parameters using the helper method
             (
@@ -283,9 +342,16 @@ class TelegramBot:
                 sprint_id,
                 link_issue,
                 project_key,
+                assignee,
+                epic,
                 should_stop,
             ) = await self._parse_task_parameters(
-                task_description, update, component_service, sprint_service
+                task_description,
+                update,
+                component_service,
+                sprint_service,
+                assignee_service,
+                epic_service,
             )
             if should_stop:
                 return
@@ -347,6 +413,8 @@ class TelegramBot:
                 sprint_id=sprint_id,
                 labels=labels,
                 project_key=project_key,
+                assignee=assignee,
+                epic_key=epic,
             )
 
             if error_message:
@@ -473,9 +541,11 @@ class TelegramBot:
                 await update.message.reply_text(self.REGISTRATION_REQUIRED_MSG)
                 return
 
-            # Get component and sprint services for this user's jira_service
+            # Get component, sprint, assignee and epic services for this user's jira_service
             component_service = self._get_component_service(jira_service)
             sprint_service = self._get_sprint_service(jira_service)
+            assignee_service = self._get_assignee_service(jira_service)
+            epic_service = self._get_epic_service(jira_service)
 
             # Get the user's message text
             message_text = update.message.text or ""
@@ -518,9 +588,16 @@ class TelegramBot:
                 sprint_id,
                 link_issue,
                 project_key,
+                assignee,
+                epic,
                 should_stop,
             ) = await self._parse_task_parameters(
-                task_description, update, component_service, sprint_service
+                task_description,
+                update,
+                component_service,
+                sprint_service,
+                assignee_service,
+                epic_service,
             )
             if should_stop:
                 return
@@ -582,6 +659,8 @@ class TelegramBot:
                 sprint_id=sprint_id,
                 labels=labels,
                 project_key=project_key,
+                assignee=assignee,
+                epic_key=epic,
             )
 
             if error_message:
@@ -640,6 +719,8 @@ class TelegramBot:
 /task <description> sprint: <query> - Add task to a specific sprint
 /task <description> link: <issue-key> - Link to another Jira issue
 /task <description> project: <key> - Create task in a specific project (default: AAI)
+/task <description> assignee: <name> - Assign to a user (alias: who:; matched by name)
+/task <description> epic: <name> - Link to an epic (matched by name or key)
 /task desc: <description> - Use description after "desc:" as task description
 /desc <issue-key> - Get details of a Jira issue (e.g., /desc 123 or /desc PROJ-123)
 /search <words> - Full-text search issues by summary and description (default project: AAI)
@@ -668,6 +749,9 @@ class TelegramBot:
 /bug Login issue component: авиа-параметры sprint: active
 /story desc: Implement user authentication system
 /task Update schema component: devops type: Bug sprint: s3 agent
+/bug Login broken assignee: Алексей
+/story New report who: редикульцев epic: мобильное приложение
+/task Add filter epic: AAI-100
 /bug Fix related issue link: 2825
 /task Create new feature project: PROJ component: frontend
 /bug Database error project: SV component: backend sprint: active
@@ -685,7 +769,9 @@ class TelegramBot:
 • /bug and /story commands ignore any type: parameter but support all other parameters (component, sprint, link, project, desc)
 • If no close component match is found, you'll see available components list
 • Image attachments are automatically added to Jira tasks (works with /task, /bug, and /story)
-• All parameters (type, component, sprint, link, project, desc) can appear in any order
+• Assignee is guessed from a partial/Russian name (assignee: or who:) using transliteration, fuzzy matching, and an optional LLM
+• Epic is guessed from its name (epic:) the same way, or you can pass the epic key directly (e.g. epic: AAI-100)
+• All parameters (type, component, sprint, link, project, desc, assignee, epic) can appear in any order
         """
         await update.message.reply_text(help_text)
 
@@ -1688,9 +1774,11 @@ class TelegramBot:
                 await update.message.reply_text(self.REGISTRATION_REQUIRED_MSG)
                 return None
 
-            # Get component and sprint services for this user's jira_service
+            # Get component, sprint, assignee and epic services for this user's jira_service
             component_service = self._get_component_service(jira_service)
             sprint_service = self._get_sprint_service(jira_service)
+            assignee_service = self._get_assignee_service(jira_service)
+            epic_service = self._get_epic_service(jira_service)
 
             # Parse task parameters using the helper method
             (
@@ -1701,9 +1789,16 @@ class TelegramBot:
                 sprint_id,
                 link_issue,
                 project_key,
+                assignee,
+                epic,
                 should_stop,
             ) = await self._parse_task_parameters(
-                task_description, update, component_service, sprint_service
+                task_description,
+                update,
+                component_service,
+                sprint_service,
+                assignee_service,
+                epic_service,
             )
             if should_stop:
                 return None
@@ -1764,6 +1859,8 @@ class TelegramBot:
                 sprint_id=sprint_id,
                 labels=labels,
                 project_key=project_key,
+                assignee=assignee,
+                epic_key=epic,
             )
 
             if error_message:

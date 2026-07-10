@@ -59,11 +59,34 @@ def test_search_builds_jql_without_project(jira_service):
     ]
 
     jql = jira_service.jira.search_issues.call_args[0][0]
-    assert 'summary ~ "login timeout"' in jql
-    assert 'description ~ "login timeout"' in jql
-    assert "OR" in jql
+    # Each word matched by prefix wildcard against summary OR description...
+    assert 'summary ~ "login*"' in jql
+    assert 'description ~ "login*"' in jql
+    assert 'summary ~ "timeout*"' in jql
+    assert 'description ~ "timeout*"' in jql
+    # ...and both words required (AND), in any order.
+    assert ") AND (" in jql
     assert "ORDER BY updated DESC" in jql
     assert "project =" not in jql
+
+
+def test_search_is_case_insensitive(jira_service):
+    jira_service.jira.search_issues.return_value = []
+    jira_service.search_issues("LogIn TimeOut")
+    jql = jira_service.jira.search_issues.call_args[0][0]
+    # Words are lowercased so wildcard queries match the lowercased index.
+    assert 'summary ~ "login*"' in jql
+    assert 'summary ~ "timeout*"' in jql
+    assert "LogIn" not in jql
+    assert "TimeOut" not in jql
+
+
+def test_search_single_word_has_no_and(jira_service):
+    jira_service.jira.search_issues.return_value = []
+    jira_service.search_issues("dashboard")
+    jql = jira_service.jira.search_issues.call_args[0][0]
+    assert 'summary ~ "dashboard*"' in jql
+    assert ") AND (" not in jql
 
 
 def test_search_builds_jql_with_project(jira_service):
@@ -75,6 +98,7 @@ def test_search_builds_jql_with_project(jira_service):
     assert results == []
     jql = jira_service.jira.search_issues.call_args[0][0]
     assert 'project = "SV" AND' in jql
+    assert 'summary ~ "dashboard*"' in jql
 
 
 def test_search_passes_max_results(jira_service):
@@ -88,7 +112,9 @@ def test_search_escapes_quotes_in_query(jira_service):
     jira_service.jira.search_issues.return_value = []
     jira_service.search_issues('say "hi"')
     jql = jira_service.jira.search_issues.call_args[0][0]
-    assert 'summary ~ "say \\"hi\\""' in jql
+    # Each word is escaped and wildcarded independently.
+    assert 'summary ~ "say*"' in jql
+    assert 'summary ~ "\\"hi\\"*"' in jql
 
 
 def test_search_handles_jira_error(jira_service):
@@ -239,3 +265,102 @@ def test_create_story_jira_error(jira_service):
 
     assert key is None
     assert error.startswith("❌ Failed to create Jira issue")
+
+
+def test_create_story_assigns_issue(jira_service):
+    jira_service.jira.project.return_value = MagicMock(name="proj")
+    jira_service.jira.project_components.return_value = [_component("org")]
+    created = MagicMock()
+    created.key = "AAI-12"
+    jira_service.jira.create_issue.return_value = created
+
+    key, error = jira_service.create_story(
+        summary="S",
+        component_name="org",
+        project_key="AAI",
+        assignee="aleksei.dolzhenkov",
+    )
+
+    assert key == "AAI-12"
+    assert error is None
+    jira_service.jira.assign_issue.assert_called_once_with(
+        "AAI-12", "aleksei.dolzhenkov"
+    )
+
+
+def test_create_story_assignment_failure_is_nonfatal(jira_service):
+    jira_service.jira.project.return_value = MagicMock(name="proj")
+    jira_service.jira.project_components.return_value = [_component("org")]
+    created = MagicMock()
+    created.key = "AAI-13"
+    jira_service.jira.create_issue.return_value = created
+    jira_service.jira.assign_issue.side_effect = JIRAError(
+        status_code=400, text="not on screen"
+    )
+
+    key, error = jira_service.create_story(
+        summary="S", component_name="org", project_key="AAI", assignee="bad.user"
+    )
+
+    # Issue is still created even though assignment failed.
+    assert key == "AAI-13"
+    assert error is None
+
+
+def test_create_story_no_assignee_skips_assign(jira_service):
+    jira_service.jira.project.return_value = MagicMock(name="proj")
+    jira_service.jira.project_components.return_value = [_component("org")]
+    created = MagicMock()
+    created.key = "AAI-14"
+    jira_service.jira.create_issue.return_value = created
+
+    jira_service.create_story(summary="S", component_name="org", project_key="AAI")
+
+    jira_service.jira.assign_issue.assert_not_called()
+
+
+def test_create_story_links_epic(jira_service):
+    jira_service.jira.project.return_value = MagicMock(name="proj")
+    jira_service.jira.project_components.return_value = [_component("org")]
+    created = MagicMock()
+    created.key = "AAI-20"
+    jira_service.jira.create_issue.return_value = created
+
+    key, error = jira_service.create_story(
+        summary="S", component_name="org", project_key="AAI", epic_key="AAI-100"
+    )
+
+    assert key == "AAI-20"
+    assert error is None
+    jira_service.jira.add_issues_to_epic.assert_called_once_with("AAI-100", ["AAI-20"])
+
+
+def test_create_story_epic_failure_is_nonfatal(jira_service):
+    jira_service.jira.project.return_value = MagicMock(name="proj")
+    jira_service.jira.project_components.return_value = [_component("org")]
+    created = MagicMock()
+    created.key = "AAI-21"
+    jira_service.jira.create_issue.return_value = created
+    jira_service.jira.add_issues_to_epic.side_effect = JIRAError(
+        status_code=400, text="bad epic"
+    )
+
+    key, error = jira_service.create_story(
+        summary="S", component_name="org", project_key="AAI", epic_key="AAI-999"
+    )
+
+    # Issue is still created even though epic linking failed.
+    assert key == "AAI-21"
+    assert error is None
+
+
+def test_create_story_no_epic_skips_link(jira_service):
+    jira_service.jira.project.return_value = MagicMock(name="proj")
+    jira_service.jira.project_components.return_value = [_component("org")]
+    created = MagicMock()
+    created.key = "AAI-22"
+    jira_service.jira.create_issue.return_value = created
+
+    jira_service.create_story(summary="S", component_name="org", project_key="AAI")
+
+    jira_service.jira.add_issues_to_epic.assert_not_called()

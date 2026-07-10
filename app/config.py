@@ -40,6 +40,18 @@ class Config:
     # Proxy Configuration (optional, for Telegram API access)
     TELEGRAM_PROXY_URL = os.getenv("TELEGRAM_PROXY_URL")  # e.g. http://user:pass@host:port
 
+    # LLM Configuration (optional, OpenAI-compatible endpoint used for assignee guessing)
+    # If OPENAI_API_BASE / OPENAI_API_KEY are unset, assignee resolution falls back
+    # to local transliteration + fuzzy matching only.
+    OPENAI_API_BASE = os.getenv("OPENAI_API_BASE")  # e.g. https://host:port/v1
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    OPENAI_MODEL = os.getenv(
+        "OPENAI_MODEL", "unsloth/Qwen3-235B-A22B-Instruct-2507-GGUF"
+    )
+    # Short timeout (seconds) for the assignee LLM call so a slow/unreachable
+    # endpoint can never freeze the bot's event loop for long.
+    LLM_ASSIGNEE_TIMEOUT = int(os.getenv("LLM_ASSIGNEE_TIMEOUT", "5"))
+
     @classmethod
     def validate(cls):
         """Validate that all required configuration is present."""
