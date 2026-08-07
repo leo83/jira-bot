@@ -204,34 +204,9 @@ class TelegramBot:
                     await update.message.reply_text(component_message)
                     return None, None, None, None, None, None, None, None, None, True
 
-            # Process sprint parameter
-            if "sprint" in params and _sprint_service:
-                sprint_query = params["sprint"]
-                sprint_id, sprint_message = _sprint_service.find_sprint(sprint_query)
-
-                if sprint_message:
-                    # Error or ambiguity - notify user
-                    await update.message.reply_text(sprint_message)
-                    return None, None, None, None, None, None, None, None, None, True
-
-                logger.info(
-                    f"Selected sprint ID: {sprint_id} for query '{sprint_query}'"
-                )
-
-            # Process description parameter
-            if "description" in params:
-                jira_description = params["description"]
-                logger.info(f"Extracted Jira description: '{jira_description}'")
-
-            # Process link parameter
-            if "link" in params:
-                link_issue = params["link"].strip()
-                # If only digits, prepend project key
-                if link_issue.isdigit():
-                    link_issue = f"{project_key}-{link_issue}"
-                logger.info(f"Extracted link issue: '{link_issue}'")
-
-            # Process assignee parameter (needs project_key to fetch the user pool)
+            # Process assignee parameter (needs project_key to fetch the user
+            # pool). Resolved before sprint: `sprint: current` picks between
+            # the simultaneously active team sprints using the assignee.
             if "assignee" in params and _assignee_service:
                 assignee_query = params["assignee"]
                 assignee_username, assignee_message = _assignee_service.find_assignee(
@@ -246,6 +221,47 @@ class TelegramBot:
                 logger.info(
                     f"Selected assignee '{assignee_username}' for query '{assignee_query}'"
                 )
+
+            # Process sprint parameter
+            if "sprint" in params and _sprint_service:
+                sprint_query = params["sprint"]
+                sprint_id, sprint_message = _sprint_service.find_sprint(
+                    sprint_query,
+                    assignee=assignee_username,
+                    # Only an explicitly requested component is a team signal;
+                    # component_name otherwise holds the configured default,
+                    # which every issue would carry.
+                    component=component_name if "component" in params else None,
+                    project_key=project_key,
+                )
+
+                if sprint_message:
+                    # Error or ambiguity - notify user
+                    await update.message.reply_text(sprint_message)
+                    return None, None, None, None, None, None, None, None, None, True
+
+                logger.info(
+                    f"Selected sprint ID: {sprint_id} for query '{sprint_query}'"
+                )
+
+                # Tell the user which sprint an ambiguous "current" resolved to
+                # - sprint assignment is best-effort post-create, so a wrong
+                # guess would otherwise be silent.
+                if getattr(_sprint_service, "last_selection_note", None):
+                    await update.message.reply_text(_sprint_service.last_selection_note)
+
+            # Process description parameter
+            if "description" in params:
+                jira_description = params["description"]
+                logger.info(f"Extracted Jira description: '{jira_description}'")
+
+            # Process link parameter
+            if "link" in params:
+                link_issue = params["link"].strip()
+                # If only digits, prepend project key
+                if link_issue.isdigit():
+                    link_issue = f"{project_key}-{link_issue}"
+                logger.info(f"Extracted link issue: '{link_issue}'")
 
             # Process epic parameter (needs project_key to fetch the epic pool)
             if "epic" in params and _epic_service:
@@ -717,6 +733,7 @@ class TelegramBot:
 /task <description> component: <label> - Create task with specific component
 /task <description> type: <type> - Create task with specific type (Story, Bug)
 /task <description> sprint: <query> - Add task to a specific sprint
+/task <description> sprint: current - Add task to your team's currently running sprint
 /task <description> link: <issue-key> - Link to another Jira issue
 /task <description> project: <key> - Create task in a specific project (default: AAI)
 /task <description> assignee: <name> - Assign to a user (alias: who:; matched by name)
@@ -763,6 +780,7 @@ class TelegramBot:
 • Component matching uses transliteration and fuzzy matching for Russian labels
 • Components are fetched dynamically from Jira (DEPRECATED components are filtered out)
 • Sprint matching uses fuzzy matching (e.g., "s3 agent" matches "2025Q4-S3_агент")
+• sprint: current (also active/текущий) picks the running sprint of the right team when several teams share the board — by assignee:, then by component:, then by who is creating the issue
 • Link parameter creates "Relates" link to specified issue (e.g., link: 123 or link: PROJ-123)
 • Project parameter allows creating tasks in any Jira project (default: AAI)
 • Available issue types: Story, Bug
