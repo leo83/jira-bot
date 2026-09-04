@@ -744,6 +744,7 @@ class TelegramBot:
 /search <words> project: <key> - Search within another project (project: all - search everywhere)
 /link message_ref: <uuid> jira: <key> - Store message reference and Jira issue link
 /unlink message_ref: <uuid> jira: <key> - Remove message reference and Jira issue link
+/linkmany - Store multiple message_ref/Jira links at once (one "message_ref: <uuid> jira: <key1>,<key2>" pair per line)
 
 ℹ️ Информация:
 /help - Show this help message
@@ -762,6 +763,9 @@ class TelegramBot:
 /search оплата картой project: SV
 /link message_ref: 550e8400-e29b-41d4-a716-446655440000 jira: AAI-1020
 /unlink message_ref: 550e8400-e29b-41d4-a716-446655440000 jira: AAI-1020
+/linkmany
+message_ref: 550e8400-e29b-41d4-a716-446655440000 jira: AAI-1020,AAI-1021
+message_ref: 123e4567-e89b-12d3-a456-426614174000 jira: SV-4403
 /task Fix critical bug type: Bug
 /bug Login issue component: авиа-параметры sprint: active
 /story desc: Implement user authentication system
@@ -1297,6 +1301,128 @@ class TelegramBot:
                 f"❌ An error occurred while removing the link: {str(e)}"
             )
             logger.error(f"Error in unlink_command: {e}", exc_info=True)
+
+    async def linkmany_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle the /linkmany command to store multiple message_ref/Jira links at once.
+
+        Accepts one `message_ref: <uuid> jira: <key>[,<key>...]` pair per line, so a
+        whole spreadsheet tab can be pasted in one message. A single line may list
+        several Jira keys (comma-separated) for the same message_ref.
+        """
+        if not update.message:
+            return
+
+        user = update.effective_user
+
+        # Check user permissions
+        if not UserConfig.is_user_allowed(user.username, user.id):
+            await update.message.reply_text(
+                "❌ Access denied. You are not authorized to use this command."
+            )
+            logger.warning(
+                f"Unauthorized access attempt by user: {user.username} (ID: {user.id})"
+            )
+            return
+
+        # Get user's JiraService with their personal token
+        jira_service = self._get_user_jira_service(user.id)
+        if not jira_service:
+            await update.message.reply_text(self.REGISTRATION_REQUIRED_MSG)
+            return
+
+        message_text = update.message.text or ""
+        parts = message_text.split(maxsplit=1)
+
+        if len(parts) < 2:
+            await update.message.reply_text(
+                "❌ Please provide parameters, one pair per line.\n\n"
+                "Usage: `/linkmany`\n"
+                "`message_ref: <uuid> jira: <key1>,<key2>`\n"
+                "`message_ref: <uuid> jira: <key>`\n\n"
+                "Example:\n"
+                "`/linkmany`\n"
+                "`message_ref: 550e8400-e29b-41d4-a716-446655440000 jira: AAI-1020,AAI-1021`\n"
+                "`message_ref: 123e4567-e89b-12d3-a456-426614174000 jira: SV-4403`"
+            )
+            return
+
+        import re
+
+        uuid_pattern = re.compile(
+            r"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$"
+        )
+        line_pattern = re.compile(
+            r"message_ref:\s*([a-fA-F0-9\-]+)\s*jira:\s*(.+)", re.IGNORECASE
+        )
+
+        lines = [line.strip() for line in parts[1].splitlines() if line.strip()]
+        if not lines:
+            await update.message.reply_text("❌ No lines with parameters found.")
+            return
+
+        results: List[str] = []
+        linked_count = 0
+        failed_count = 0
+
+        for line in lines:
+            match = line_pattern.search(line)
+            if not match:
+                results.append(f"❌ Could not parse: `{line}`")
+                failed_count += 1
+                continue
+
+            message_ref = match.group(1).strip()
+            raw_keys = match.group(2).strip()
+
+            if not uuid_pattern.match(message_ref):
+                results.append(f"❌ Invalid UUID `{message_ref}` in: `{line}`")
+                failed_count += 1
+                continue
+
+            jira_keys = [key.strip() for key in raw_keys.split(",") if key.strip()]
+            if not jira_keys:
+                results.append(f"❌ No Jira keys in: `{line}`")
+                failed_count += 1
+                continue
+
+            for raw_key in jira_keys:
+                jira_key = raw_key.upper()
+                if jira_key.isdigit():
+                    jira_key = f"{Config.JIRA_PROJECT_KEY}-{jira_key}"
+
+                try:
+                    success, error_reason = self.database_service.insert_jira_issue_link(
+                        message_ref, jira_key
+                    )
+
+                    if success:
+                        grafana_url = f"{Config.GRAFANA_MESSAGE_URL}{message_ref}"
+                        comment = f"Message reference linked: {grafana_url}"
+                        jira_service.add_comment(jira_key, comment)
+                        results.append(f"✅ {message_ref} → {jira_key}")
+                        linked_count += 1
+                        logger.info(
+                            f"User {user.username} linked message_ref {message_ref} to Jira issue {jira_key}"
+                        )
+                    elif error_reason == "duplicate":
+                        results.append(f"⚠️ {message_ref} → {jira_key} (already linked)")
+                        failed_count += 1
+                    else:
+                        results.append(f"❌ {message_ref} → {jira_key} (database error)")
+                        failed_count += 1
+                        logger.error(
+                            f"Failed to insert link: message_ref={message_ref}, jira_key={jira_key}"
+                        )
+                except Exception as e:
+                    results.append(f"❌ {message_ref} → {jira_key} (error: {e})")
+                    failed_count += 1
+                    logger.error(f"Error in linkmany_command: {e}", exc_info=True)
+
+        summary = f"Linked: {linked_count}, Failed/Skipped: {failed_count}\n\n" + "\n".join(results)
+
+        # Telegram messages are capped at 4096 chars; split into chunks if needed.
+        for i in range(0, len(summary), 4000):
+            await update.message.reply_text(summary[i : i + 4000])
 
     async def desc_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle the /desc command to fetch and display Jira issue details."""
@@ -1969,6 +2095,7 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("story", self._with_retry(self.story_command)))
         self.application.add_handler(CommandHandler("link", self._with_retry(self.link_command)))
         self.application.add_handler(CommandHandler("unlink", self._with_retry(self.unlink_command)))
+        self.application.add_handler(CommandHandler("linkmany", self._with_retry(self.linkmany_command)))
         self.application.add_handler(CommandHandler("desc", self._with_retry(self.desc_command)))
         self.application.add_handler(CommandHandler("search", self._with_retry(self.search_command)))
         self.application.add_handler(CommandHandler("help", self._with_retry(self.help_command)))
