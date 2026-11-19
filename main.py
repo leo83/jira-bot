@@ -9,6 +9,10 @@ from app.telegram_bot import TelegramBot
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
+# httpx logs every request URL at INFO, and Telegram API URLs embed the bot token
+# (https://api.telegram.org/bot<token>/getUpdates) — keep it out of pod logs.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 async def main():

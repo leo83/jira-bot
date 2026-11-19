@@ -57,6 +57,7 @@ All config is env vars read at import time in `app/config.py` (`Config`) and `ap
 
 - **Blocking I/O in async handlers.** All Jira and ClickHouse calls are synchronous and are `await`ed only for Telegram replies. PTB processes updates sequentially, so a slow Jira/LLM call blocks the whole bot. Do **not** naively wrap these in `asyncio.to_thread` — `clickhouse_driver.Client` is not thread-safe.
 - **Tests can't import services normally.** `DatabaseService`, `JiraService`, `TelegramBot` all connect/instantiate clients in `__init__`. Tests either patch the client class (`patch("app.jira_service.JIRA")`, `patch("app.database_service.Client")`) or build the object with `object.__new__(TelegramBot)` and set attributes manually. `pytest-asyncio` runs in `asyncio_mode = auto` (async tests need no marker).
+- **The bot token is in every Telegram API URL**, so `main.py` sets the `httpx`/`httpcore` loggers to WARNING. Consequently pod logs no longer show `getUpdates 200` lines; polling liveness is the watchdog's job. Don't lower that level or log raw request URLs.
 - **Formatting is not enforced repo-wide.** The pre-existing `app/*.py` files are not black-clean, so do **not** run black across them (it churns unrelated code). Format only new/edited files.
 
 ## Deploy
