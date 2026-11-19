@@ -61,6 +61,8 @@ Optional environment variables (defaults provided):
 - `JIRA_URL` - Jira server URL (default: https://jira.example.com)
 - `JIRA_PROJECT_KEY` - Project key (default: PROJ)
 - `JIRA_COMPONENT_NAME` - Component name (default: default)
+- `TELEGRAM_PROXY_URL` - HTTP proxy for Telegram API, e.g. `http://user:pass@host:3128`
+- `POLLING_WATCHDOG_TIMEOUT` - Restart the bot if no Telegram poll completes for this many seconds; recovers from silent hangs after proxy failures (default: 300, `0` disables)
 
 ### 3. Getting Jira API Token
 

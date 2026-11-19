@@ -30,11 +30,14 @@ All config is env vars read at import time in `app/config.py` (`Config`) and `ap
 
 **Per-user token flow (central pattern):** there is no shared Jira client. On each command, `_get_user_jira_service(telegram_id)` reads the user's Fernet-encrypted token from ClickHouse (`DatabaseService`), decrypts it (`CryptoService`), and builds a fresh `JiraService.with_token(...)`. From that per-user `JiraService`, the handler constructs per-request `ComponentService`, `SprintService`, `AssigneeService`, `EpicService`. Nothing is cached across commands except within a single service instance.
 
-**Command handlers** live in the `TelegramBot` monolith. Every handler is registered wrapped in `_with_retry(...)`, which retries transient Telegram `NetworkError` with exponential backoff and, after exhausting retries, calls `os._exit(1)` so Kubernetes restarts the pod.
+**Command handlers** live in the `TelegramBot` monolith. Every handler is registered wrapped in `_with_retry(...)`, which retries transient Telegram `NetworkError` with exponential backoff and, after exhausting retries, calls `os._exit(1)` so Kubernetes restarts the pod. `BadRequest` is a `NetworkError` subclass but deterministic (e.g. "Message is too long"), so it is excluded: logged, never retried, never kills the pod. Long replies must be chunked (`split_message`, ≤4000 chars) — `/help` already exceeds Telegram's 4096 limit.
 
-**Parameter parsing — the fragile core:** `_parse_task_parameters` extracts `type:`, `component:`, `sprint:`, `desc:`/`description:`, `link:`, `project:`, `assignee:`/`who:`, `epic:` from free-form text via one regex, in any order. Two things must stay in sync when adding a parameter:
+**Polling watchdog (`app/watchdog.py`).** After a proxy failure (`proxy.aeroclub.ru:3128`, shared with llm-proxy and flaky) PTB polling can hang silently — the pod stays `Running` but fetches nothing, and the Deployment has no liveness probe. `getUpdates` therefore goes through its own `HeartbeatHTTPXRequest` (passed via `get_updates_request`, which is why the builder no longer sets `get_updates_*` options) that calls `PollingWatchdog.beat()` on every completed HTTP response. A daemon thread (independent of the asyncio loop) calls `os._exit(1)` when nothing completed for `POLLING_WATCHDOG_TIMEOUT` seconds (default 300, `0` disables; a normal long-poll cycle is ~30s). Because handlers block the loop with sync Jira/ClickHouse calls, `_with_retry` marks handlers in flight (`handler_started`/`handler_finished`) and the limit is relaxed to 1800s while one runs — otherwise a big `/linkmany` would trip the watchdog mid-batch.
+
+**Parameter parsing — the fragile core:** `_parse_task_parameters` extracts `type:`, `component:`, `sprint:`, `desc:`/`description:`, `link:`, `project:`, `assignee:`/`who:`, `epic:`, `priority:` from free-form text via one regex, in any order. Two things must stay in sync when adding a parameter:
 - the keyword list appears **twice** in `param_pattern` (the capture alternation *and* the lookahead) — update both or summary extraction breaks;
 - the *processing* order inside the parser matters even though the tuple order doesn't: `assignee:` is resolved **before** `sprint:` because `sprint: current` uses the assignee to pick a team, and only an explicitly-passed `component:` is forwarded as a team signal (`component_name` otherwise holds `Config.JIRA_COMPONENT_NAME`, which every issue carries);
+- `priority:` is only *extracted* by the parser (it has no Jira client); `JiraService.create_story` resolves it via `resolve_priority` (case-insensitive / prefix / fuzzy / Russian aliases against `jira.priorities()`) and refuses to create the issue on an unknown value, like `component:`. An unknown keyword is not an error — its text is silently glued onto the previous parameter's value (that is how `sprint: current priority: Critical` used to fail as "no such sprint");
 - it returns a **positional tuple** that is unpacked identically at three duplicated create paths — `task_command`, `_process_bug_or_story` (/bug, /story), and `_process_task` (photo captions). Adding a field means editing the tuple, all three unpack sites, and every `should_stop` early-return in the parser. `tests/test_parse_task_parameters.py` maps the tuple to names and asserts its arity to catch mismatches.
 
 **"Guessing" services** all follow the same shape: transliterate the query (Russian→Latin via `transliterate`) and fuzzy-match (`difflib`) against a candidate pool, returning `(value, message)` where a non-empty `message` means "stop and show the user" (not found / ambiguous). Each is independent (some duplication is intentional and matches the existing style):
@@ -62,6 +65,17 @@ Production runs in Kubernetes namespace `production` via the Helm chart in `helm
 
 1. `just docker-build` computes a date tag (`scripts/next_rc_version.py --prod`, e.g. `20260710.1`) by reading the registry, builds `linux/amd64`, and pushes.
 2. **The two `just` recipes are decoupled:** `helm-deploy` reads `helm/jira-bot/values-production.yaml`, whose `image.tag` is **hardcoded**. After building, bump that tag to the newly-pushed one or `helm-deploy` re-deploys the old image.
-3. `just helm-deploy` → `helm upgrade --install`. Verify with `kubectl rollout status deployment/jira-bot -n production` and check logs for `Bot is running`.
+3. `just helm-deploy` → `helm upgrade --install`. Verify with `kubectl rollout status deployment/jira-bot -n production` and check logs for `Bot is running` and `Polling watchdog started`.
+
+**From the Mac, `just docker-build` cannot push:** `proget.aeroclub.ru` (10.20.104.69) does not resolve there, so both the tag lookup and `docker push` fail. Proget is reachable only through the `aclub-tunel` SOCKS proxy (`127.0.0.1:1080`); push with `crane` instead (same recipe as `~/dev/aeroclub/tg-bot-battery/HANDOFF-k8s.md`):
+
+```bash
+HTTPS_PROXY=socks5h://127.0.0.1:1080 NO_PROXY= crane ls proget.aeroclub.ru/aeroclub-infrastructure/library/services-ai-jira-bot   # pick next YYYYMMDD.N
+I=proget.aeroclub.ru/aeroclub-infrastructure/library/services-ai-jira-bot:<TAG>
+docker buildx build --platform linux/amd64 --provenance=false --sbom=false -t $I --load .
+docker save $I -o /tmp/jb.tar && HTTPS_PROXY=socks5h://127.0.0.1:1080 NO_PROXY= crane push /tmp/jb.tar $I && rm /tmp/jb.tar
+```
+
+Before `helm-deploy`, compare `helm get values jira-bot -n production` with the local `values-production.yaml` — the local copy may be stale; only `image.tag` should differ. Rollback: `helm rollback jira-bot <rev> -n production`.
 
 `values-production.yaml` is **gitignored** (it holds real secrets and the tag). The Helm deployment template passes only a fixed set of env vars — adding a new `Config` var that must reach prod means editing that template too.

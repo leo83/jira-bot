@@ -364,3 +364,61 @@ def test_create_story_no_epic_skips_link(jira_service):
     jira_service.create_story(summary="S", component_name="org", project_key="AAI")
 
     jira_service.jira.add_issues_to_epic.assert_not_called()
+
+
+# ---------------------------------------------------------------- priority ---
+
+
+def _priority(name):
+    p = MagicMock()
+    p.name = name
+    return p
+
+
+@pytest.fixture
+def with_priorities(jira_service):
+    jira_service.jira.priorities.return_value = [
+        _priority(n) for n in ["Blocker", "Critical", "Major", "Minor", "Trivial"]
+    ]
+    return jira_service
+
+
+@pytest.mark.parametrize(
+    "query,expected",
+    [("Critical", "Critical"), ("critical", "Critical"), ("crit", "Critical"),
+     ("критический", "Critical"), ("blokcer", "Blocker")],
+)
+def test_resolve_priority_matches(with_priorities, query, expected):
+    assert with_priorities.resolve_priority(query) == (expected, None)
+
+
+def test_resolve_priority_unknown_lists_available(with_priorities):
+    name, error = with_priorities.resolve_priority("urgent")
+    assert name is None
+    assert "urgent" in error and "Critical" in error and "Trivial" in error
+
+
+def test_resolve_priority_ambiguous(with_priorities):
+    name, error = with_priorities.resolve_priority("m")
+    assert name is None
+    assert "Major" in error and "Minor" in error
+
+
+def test_create_story_sets_priority(with_priorities):
+    js = with_priorities
+    js.jira.project.return_value = MagicMock(name="proj")
+    js.jira.project_components.return_value = [_component("org")]
+    js.jira.create_issue.return_value = MagicMock(key="AAI-11")
+    key, error = js.create_story(summary="Fix it", project_key="AAI", priority="crit")
+    assert error is None
+    assert js.jira.create_issue.call_args[1]["fields"]["priority"] == {"name": "Critical"}
+
+
+def test_create_story_unknown_priority_does_not_create(with_priorities):
+    js = with_priorities
+    js.jira.project.return_value = MagicMock(name="proj")
+    js.jira.project_components.return_value = [_component("org")]
+    key, error = js.create_story(summary="Fix it", project_key="AAI", priority="urgent")
+    assert key is None
+    assert "urgent" in error
+    js.jira.create_issue.assert_not_called()

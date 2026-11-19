@@ -40,6 +40,10 @@ class Config:
     # Proxy Configuration (optional, for Telegram API access)
     TELEGRAM_PROXY_URL = os.getenv("TELEGRAM_PROXY_URL")  # e.g. http://user:pass@host:port
 
+    # Restart the process (os._exit) if no getUpdates request completes for this many
+    # seconds — polling can hang silently after a proxy failure. 0 disables the watchdog.
+    POLLING_WATCHDOG_TIMEOUT = float(os.getenv("POLLING_WATCHDOG_TIMEOUT", "300"))
+
     # LLM Configuration (optional, OpenAI-compatible endpoint used for assignee guessing)
     # If OPENAI_API_BASE / OPENAI_API_KEY are unset, assignee resolution falls back
     # to local transliteration + fuzzy matching only.

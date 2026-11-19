@@ -9,7 +9,7 @@ from typing import List
 
 import backoff  # type: ignore[import-untyped]
 from telegram import Update
-from telegram.error import NetworkError
+from telegram.error import BadRequest, NetworkError
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -29,8 +29,25 @@ from .jira_service import JiraService
 from .llm_service import LLMService
 from .sprint_service import SprintService
 from .users import UserConfig
+from .watchdog import HeartbeatHTTPXRequest, PollingWatchdog
 
 logger = logging.getLogger(__name__)
+
+def split_message(text: str, limit: int = 4000) -> List[str]:
+    """Split text into chunks of at most ``limit`` chars (Telegram caps messages at 4096),
+    preferring paragraph/line breaks."""
+    chunks: List[str] = []
+    while len(text) > limit:
+        cut = text.rfind("\n\n", 0, limit)
+        if cut <= 0:
+            cut = text.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = limit
+        chunks.append(text[:cut].rstrip())
+        text = text[cut:].lstrip("\n")
+    if text:
+        chunks.append(text)
+    return chunks
 
 
 class TelegramBot:
@@ -115,8 +132,8 @@ class TelegramBot:
     ):
         """
         Parse task parameters from task_description. Parameters can appear in any order.
-        Supported parameters: type:, component:, sprint:, desc:/description:, link:, project:, assignee:/who:, epic:
-        Returns: (summary, description, component_name, issue_type, sprint_id, link_issue, project_key, assignee, epic_key, should_stop)
+        Supported parameters: type:, component:, sprint:, desc:/description:, link:, project:, assignee:/who:, epic:, priority:
+        Returns: (summary, description, component_name, issue_type, sprint_id, link_issue, project_key, assignee, epic_key, priority, should_stop)
         """
         import re
 
@@ -129,6 +146,7 @@ class TelegramBot:
         project_key = Config.JIRA_PROJECT_KEY
         assignee_username = None
         epic_key = None
+        priority = None
 
         # Use provided services or fall back to instance services (for backward compatibility)
         _component_service = component_service or self.component_service
@@ -140,7 +158,7 @@ class TelegramBot:
         # to the next parameter keyword. re.DOTALL lets desc: span newlines; the
         # lookahead stops at the next keyword. NOTE: the keyword list must be kept
         # identical in the capture group and the lookahead, or summary extraction breaks.
-        param_pattern = r"(type:|component:|sprint:|desc:|description:|link:|project:|assignee:|who:|epic:)\s*(.+?)(?=\s*\b(?:type:|component:|sprint:|desc:|description:|link:|project:|assignee:|who:|epic:)|$)"
+        param_pattern = r"(type:|component:|sprint:|desc:|description:|link:|project:|assignee:|who:|epic:|priority:)\s*(.+?)(?=\s*\b(?:type:|component:|sprint:|desc:|description:|link:|project:|assignee:|who:|epic:|priority:)|$)"
 
         matches = list(
             re.finditer(param_pattern, task_description, re.IGNORECASE | re.DOTALL)
@@ -188,7 +206,7 @@ class TelegramBot:
 
                 if issue_type_message:
                     await update.message.reply_text(issue_type_message)
-                    return None, None, None, None, None, None, None, None, None, True
+                    return None, None, None, None, None, None, None, None, None, None, True
 
             # Process component parameter (needs project_key)
             if "component" in params and _component_service:
@@ -202,7 +220,7 @@ class TelegramBot:
 
                 if component_message:
                     await update.message.reply_text(component_message)
-                    return None, None, None, None, None, None, None, None, None, True
+                    return None, None, None, None, None, None, None, None, None, None, True
 
             # Process assignee parameter (needs project_key to fetch the user
             # pool). Resolved before sprint: `sprint: current` picks between
@@ -216,7 +234,7 @@ class TelegramBot:
                 if assignee_message:
                     # Not found / ambiguous - notify user and stop
                     await update.message.reply_text(assignee_message)
-                    return None, None, None, None, None, None, None, None, None, True
+                    return None, None, None, None, None, None, None, None, None, None, True
 
                 logger.info(
                     f"Selected assignee '{assignee_username}' for query '{assignee_query}'"
@@ -238,7 +256,7 @@ class TelegramBot:
                 if sprint_message:
                     # Error or ambiguity - notify user
                     await update.message.reply_text(sprint_message)
-                    return None, None, None, None, None, None, None, None, None, True
+                    return None, None, None, None, None, None, None, None, None, None, True
 
                 logger.info(
                     f"Selected sprint ID: {sprint_id} for query '{sprint_query}'"
@@ -273,9 +291,15 @@ class TelegramBot:
                 if epic_message:
                     # Not found / ambiguous - notify user and stop
                     await update.message.reply_text(epic_message)
-                    return None, None, None, None, None, None, None, None, None, True
+                    return None, None, None, None, None, None, None, None, None, None, True
 
                 logger.info(f"Selected epic '{epic_key}' for query '{epic_query}'")
+
+            # Priority is only extracted here; JiraService.create_story resolves it
+            # against the Jira priority list (the parser has no Jira client).
+            if params.get("priority"):
+                priority = params["priority"].strip()
+                logger.info(f"Extracted priority: '{priority}'")
 
             # Use summary from what's left after removing parameters
             task_description = summary
@@ -311,6 +335,7 @@ class TelegramBot:
             project_key,
             assignee_username,
             epic_key,
+            priority,
             False,
         )
 
@@ -360,6 +385,7 @@ class TelegramBot:
                 project_key,
                 assignee,
                 epic,
+                priority,
                 should_stop,
             ) = await self._parse_task_parameters(
                 task_description,
@@ -431,6 +457,7 @@ class TelegramBot:
                 project_key=project_key,
                 assignee=assignee,
                 epic_key=epic,
+                priority=priority,
             )
 
             if error_message:
@@ -606,6 +633,7 @@ class TelegramBot:
                 project_key,
                 assignee,
                 epic,
+                priority,
                 should_stop,
             ) = await self._parse_task_parameters(
                 task_description,
@@ -677,6 +705,7 @@ class TelegramBot:
                 project_key=project_key,
                 assignee=assignee,
                 epic_key=epic,
+                priority=priority,
             )
 
             if error_message:
@@ -738,6 +767,7 @@ class TelegramBot:
 /task <description> project: <key> - Create task in a specific project (default: AAI)
 /task <description> assignee: <name> - Assign to a user (alias: who:; matched by name)
 /task <description> epic: <name> - Link to an epic (matched by name or key)
+/task <description> priority: <name> - Set priority (e.g. Critical; matched against Jira priorities)
 /task desc: <description> - Use description after "desc:" as task description
 /desc <issue-key> - Get details of a Jira issue (e.g., /desc 123 or /desc PROJ-123)
 /search <words> - Full-text search issues by summary and description (default project: AAI)
@@ -771,6 +801,7 @@ message_ref: 123e4567-e89b-12d3-a456-426614174000 jira: SV-4403
 /story desc: Implement user authentication system
 /task Update schema component: devops type: Bug sprint: s3 agent
 /bug Login broken assignee: Алексей
+/bug Payment fails sprint: current priority: Critical
 /story New report who: редикульцев epic: мобильное приложение
 /task Add filter epic: AAI-100
 /bug Fix related issue link: 2825
@@ -793,9 +824,11 @@ message_ref: 123e4567-e89b-12d3-a456-426614174000 jira: SV-4403
 • Image attachments are automatically added to Jira tasks (works with /task, /bug, and /story)
 • Assignee is guessed from a partial/Russian name (assignee: or who:) using transliteration, fuzzy matching, and an optional LLM
 • Epic is guessed from its name (epic:) the same way, or you can pass the epic key directly (e.g. epic: AAI-100)
-• All parameters (type, component, sprint, link, project, desc, assignee, epic) can appear in any order
+• All parameters (type, component, sprint, link, project, desc, assignee, epic, priority) can appear in any order
         """
-        await update.message.reply_text(help_text)
+        # The help text is longer than Telegram's 4096-char limit; send it in chunks.
+        for chunk in split_message(help_text.strip()):
+            await update.message.reply_text(chunk)
 
     async def _download_photos(self, photo_attachments: List) -> List[str]:
         """
@@ -1935,6 +1968,7 @@ message_ref: 123e4567-e89b-12d3-a456-426614174000 jira: SV-4403
                 project_key,
                 assignee,
                 epic,
+                priority,
                 should_stop,
             ) = await self._parse_task_parameters(
                 task_description,
@@ -2005,6 +2039,7 @@ message_ref: 123e4567-e89b-12d3-a456-426614174000 jira: SV-4403
                 project_key=project_key,
                 assignee=assignee,
                 epic_key=epic,
+                priority=priority,
             )
 
             if error_message:
@@ -2049,8 +2084,10 @@ message_ref: 123e4567-e89b-12d3-a456-426614174000 jira: SV-4403
     def _with_retry(self, handler, max_retries: int = 3):
         """Wrap a handler with retry logic for transient Telegram NetworkErrors.
 
-        Uses exponential backoff (2^n seconds) up to max_retries attempts.
-        After all retries are exhausted, notifies the user and returns without crashing.
+        Uses exponential backoff (2^n seconds) up to max_retries attempts; after all
+        retries are exhausted the process exits so Kubernetes restarts the pod.
+        ``BadRequest`` subclasses ``NetworkError`` but is deterministic (e.g. "Message
+        is too long"): it is neither retried nor allowed to kill the process.
         """
 
         @functools.wraps(handler)
@@ -2060,19 +2097,30 @@ message_ref: 123e4567-e89b-12d3-a456-426614174000 jira: SV-4403
                 NetworkError,
                 max_tries=max_retries,
                 base=2,
+                giveup=lambda e: isinstance(e, BadRequest),
                 logger=logger,
             )
             async def _call():
                 return await handler(update, context)
 
+            # Tell the watchdog a (possibly long, loop-blocking) handler is running.
+            # getattr: tests build the bot via object.__new__ without a watchdog.
+            watchdog = getattr(self, "watchdog", None)
+            if watchdog is not None:
+                watchdog.handler_started()
             try:
                 return await _call()
+            except BadRequest as e:
+                logger.error(f"{handler.__name__}: Telegram rejected the request: {e}", exc_info=e)
             except NetworkError as e:
                 logger.critical(
                     f"{handler.__name__}: Telegram unreachable after {max_retries} retries: {e}. "
                     "Restarting application..."
                 )
                 os._exit(1)
+            finally:
+                if watchdog is not None:
+                    watchdog.handler_finished()
 
         return wrapper
 
@@ -2123,14 +2171,25 @@ message_ref: 123e4567-e89b-12d3-a456-426614174000 jira: SV-4403
                 .connect_timeout(30.0)
                 .read_timeout(30.0)
                 .write_timeout(30.0)
-                .get_updates_connect_timeout(30.0)
-                .get_updates_read_timeout(60.0)
-                .get_updates_write_timeout(30.0)
             )
 
             if Config.TELEGRAM_PROXY_URL:
                 logger.info(f"Using proxy: {Config.TELEGRAM_PROXY_URL.split('@')[-1]}")
-                builder = builder.proxy(Config.TELEGRAM_PROXY_URL).get_updates_proxy(Config.TELEGRAM_PROXY_URL)
+                builder = builder.proxy(Config.TELEGRAM_PROXY_URL)
+
+            # getUpdates gets its own request object (PTB forbids get_updates_* builder
+            # options alongside it) that reports each completed round-trip to the watchdog.
+            self.watchdog = PollingWatchdog(Config.POLLING_WATCHDOG_TIMEOUT)
+            builder = builder.get_updates_request(
+                HeartbeatHTTPXRequest(
+                    self.watchdog,
+                    connection_pool_size=1,
+                    connect_timeout=30.0,
+                    read_timeout=60.0,
+                    write_timeout=30.0,
+                    proxy=Config.TELEGRAM_PROXY_URL or None,
+                )
+            )
 
             self.application = builder.build()
 
@@ -2153,6 +2212,8 @@ message_ref: 123e4567-e89b-12d3-a456-426614174000 jira: SV-4403
                 await self.application.updater.start_polling(timeout=30)
                 await self.application.start()
                 logger.info("Bot is running")
+                if Config.POLLING_WATCHDOG_TIMEOUT > 0:
+                    self.watchdog.start()
 
                 stop_event = asyncio.Event()
                 loop = asyncio.get_running_loop()
@@ -2165,6 +2226,7 @@ message_ref: 123e4567-e89b-12d3-a456-426614174000 jira: SV-4403
                 await stop_event.wait()
 
                 logger.info("Stopping bot...")
+                self.watchdog.stop()
                 await self.application.updater.stop()
                 await self.application.stop()
             finally:

@@ -254,7 +254,7 @@ async def test_parser_resolves_assignee_before_sprint(bot, update_factory):
 
     assert result[4] == 841  # sprint_id -> the agent sprint
     assert result[7] == "Filipp.Baranov"
-    assert result[9] is False
+    assert result[-1] is False  # should_stop
     # The auto-picked sprint is reported back to the user.
     assert any(
         "2026Q3-S3_agent" in call.args[0]

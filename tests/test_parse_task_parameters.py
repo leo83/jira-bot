@@ -19,6 +19,7 @@ FIELDS = [
     "project",
     "assignee",
     "epic",
+    "priority",
     "stop",
 ]
 
@@ -302,3 +303,28 @@ async def test_epic_and_assignee_together(bot, update_factory):
     assert r["assignee"] == "ivan.petrov"
     assert r["epic"] == "AAI-100"
     assert r["stop"] is False
+
+
+async def test_priority_parameter(bot, update_factory):
+    upd = update_factory()
+    r = parsed(await bot._parse_task_parameters("Fix crash priority: Critical", upd))
+    assert r["summary"] == "Fix crash"
+    assert r["priority"] == "Critical"
+    assert r["stop"] is False
+
+
+async def test_priority_does_not_leak_into_sprint_query(bot, update_factory):
+    """Regression: 'sprint: current priority: Critical' searched for sprint 'current priority: Critical'."""
+    upd = update_factory()
+    sprint_service = MagicMock()
+    sprint_service.find_sprint.return_value = (42, None)
+    sprint_service.last_selection_note = None
+    r = parsed(
+        await bot._parse_task_parameters(
+            "Fix crash sprint: current priority: Critical", upd, sprint_service=sprint_service
+        )
+    )
+    assert sprint_service.find_sprint.call_args[0][0] == "current"
+    assert r["sprint_id"] == 42
+    assert r["priority"] == "Critical"
+    assert r["summary"] == "Fix crash"

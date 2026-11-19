@@ -66,6 +66,7 @@ class JiraService:
         project_key: str = None,
         assignee: str = None,
         epic_key: str = None,
+        priority: str = None,
     ) -> tuple[Optional[str], Optional[str]]:
         """
         Create a new Jira issue in the configured project with specified component and type.
@@ -131,6 +132,12 @@ class JiraService:
 
             if labels:
                 issue_dict["labels"] = labels
+
+            if priority:
+                priority_name, priority_error = self.resolve_priority(priority)
+                if priority_error:
+                    return None, priority_error
+                issue_dict["priority"] = {"name": priority_name}
 
             # Create the issue
             new_issue = self.jira.create_issue(fields=issue_dict)
@@ -198,6 +205,58 @@ class JiraService:
             error_msg = f"❌ Unexpected error creating Jira issue: {str(e)}"
             logger.error(f"Unexpected error creating Jira story: {e}")
             return None, error_msg
+
+    # Russian spellings users type for common priority names.
+    PRIORITY_ALIASES = {
+        "блокер": "blocker",
+        "критический": "critical",
+        "критичный": "critical",
+        "критично": "critical",
+        "высокий": "high",
+        "средний": "medium",
+        "низкий": "low",
+        "мажор": "major",
+        "минор": "minor",
+    }
+
+    def resolve_priority(self, query: str) -> tuple[Optional[str], Optional[str]]:
+        """Match a user-typed priority against Jira's priority list.
+
+        Returns (priority_name, None) on a unique match, or (None, message) listing
+        the available priorities when nothing / several match.
+        """
+        import difflib
+
+        try:
+            names = [p.name for p in self.jira.priorities()]
+        except Exception as e:
+            logger.error(f"Failed to fetch Jira priorities: {e}")
+            return None, f"❌ Не удалось получить список приоритетов из Jira: {e}"
+
+        q = query.strip().lower()
+        q = self.PRIORITY_ALIASES.get(q, q)
+        by_lower = {n.lower(): n for n in names}
+
+        if q in by_lower:
+            return by_lower[q], None
+
+        candidates = [n for n in names if n.lower().startswith(q)]
+        if not candidates:
+            candidates = [
+                by_lower[m]
+                for m in difflib.get_close_matches(q, list(by_lower), n=3, cutoff=0.6)
+            ]
+        if len(candidates) == 1:
+            logger.info(f"Resolved priority '{query}' -> '{candidates[0]}'")
+            return candidates[0], None
+
+        available = "\n".join(f"• {n}" for n in names)
+        if candidates:
+            return None, (
+                f"❓ Приоритет '{query}' неоднозначен: {', '.join(candidates)}.\n\n"
+                f"📋 Доступные приоритеты:\n{available}"
+            )
+        return None, f"❌ Приоритет '{query}' не найден.\n\n📋 Доступные приоритеты:\n{available}"
 
     def add_attachment(self, issue_key: str, attachment_path: str) -> bool:
         """
